@@ -290,8 +290,12 @@ def setup(
     logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
 
     # Silence noisy loggers (still captured, just at higher level)
-    for noisy_logger in ("telethon.network", "telethon.crypto", "asyncio"):
-        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+    # telethon.network is set to INFO so our keepalive logs (which use
+    # loggers['userbot_own.core.connection_ws'] -> child of base logger)
+    # can appear. telethon.crypto stays at WARNING.
+    logging.getLogger("telethon.network").setLevel(logging.INFO)
+    logging.getLogger("telethon.crypto").setLevel(logging.WARNING)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
 
     # Apply the noise filter narrowly to telethon.network â€” the only logger
     # that emits the three recurring disconnect-noise substrings. Scoped here
@@ -324,7 +328,7 @@ def setup(
             "<yellow>{name}</yellow> | "
             "<level>{message}</level>"
         ),
-        level="WARNING",  # Only WARNING+ for external libraries
+        level="INFO",  # Allow INFO+ for external libraries (e.g., WebSocket keepalive)
         colorize=True,
         backtrace=False,
         diagnose=False,

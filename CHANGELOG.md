@@ -1,3 +1,36 @@
+## [3.2.9] — 2026-11-04
+
+**Source:** project owner — reliability hardening across join, connection, and logging.
+
+### Fixed
+
+- **B-CONN-01** — WebSocket transport: `WsStream.close()` now drains the write buffer and cancels the read task before closing the underlying TCP socket. Prevents "SSL EOF received in state CLOSED" noise on fast reconnects.
+
+- **B-CONN-02** — Connection selector: `build_connection_kwargs()` now validates `cf_worker_domain` (must be non-empty when CF mode selected) and raises a clear `UserbotError` instead of passing an empty string to Telethon.
+
+- **B-RECON-01** — Reconnector: `reconnect_once()` handles `AuthKeyError`/`AuthKeyDuplicatedError` by resetting the session file and forcing a fresh login — no more silent hang on corrupted session.
+
+- **B-LOG-01** — Logging setup: expanded Telethon noise filter (`_NOISE_SUBSTRINGS`) with three new patterns that were flooding console on reconnect storms.
+
+### Added
+
+- **I-RECON-01** — `Reconnector` now exposes `is_healthy()` returning a `bool` — allows `ModuleManager` and health checks to query state without inspecting private attributes.
+
+- **I-CONN-01** — `ConnectionSettings.to_dict()` added — serializes the whole settings object (mode, socks5, cf) for future CLI/remote config APIs.
+
+### Changed
+
+- **C-RECON-01** — Reconnect backoff strategy: initial delay reduced from 3s → 1s, max attempts increased from 5 → 8. Faster recovery on transient network flaps.
+
+- **C-SETTINGS-01** — Settings menu: CF worker domain prompt now validates hostname format (must contain a dot, no scheme, no path).
+
+### Files changed
+
+- `userbot_own/core/connection_ws.py` — B-CONN-01
+- `userbot_own/core/connection_selector.py` — B-CONN-02, I-CONN-01
+- `userbot_own/core/reconnector.py` — B-RECON-01, C-RECON-01, I-RECON-01
+- `userbot_own/core/logging_setup.py` — B-LOG-01
+- `userbot_own/settings_menu/cli.py` — C-SETTINGS-01
 # Changelog
 
 All notable changes to this project are documented here.

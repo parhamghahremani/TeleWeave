@@ -267,6 +267,9 @@ def _edit_cf_worker_domain(conn: ConnectionSettings) -> ConnectionSettings | Non
     domain is what the separate "without Worker" option is for. This
     is the fix for the old menu's trap where Enter always re-used the
     current domain and the no-Worker route was unreachable.
+
+    v3.2.9: Now passes the current worker domain as default so switching
+    back to "with Worker" preserves the previously configured domain.
     """
     _print_header("Cloudflare — With Worker")
     print()
@@ -278,8 +281,11 @@ def _edit_cf_worker_domain(conn: ConnectionSettings) -> ConnectionSettings | Non
     print(f"  {C.DIM}official endpoints instead, pick 'without Worker' in the menu.{C.RESET}")
     print()
 
+    # v3.2.9: Pass current domain as default so Enter preserves it
+    current_domain = conn.cf_worker_domain or ""
+
     for attempt in range(1, _MAX_RETRIES + 1):
-        raw = _ask("Worker domain (e.g. userbot-relay.your-name.workers.dev)")
+        raw = _ask("Worker domain (e.g. userbot-relay.your-name.workers.dev)", default=current_domain)
         if not raw:
             _info("Cancelled — nothing changed.")
             return None

@@ -107,6 +107,19 @@ def _xor_mask(data: bytes, key: bytes) -> bytes:
     ).to_bytes(len(data), "little")
 
 
+# ─── v3.2.9: Keepalive configuration ──────────────────────────────────────
+# Can be overridden via environment variable for tuning
+import os as _os
+
+def _get_keepalive_interval() -> float:
+    """Get ping interval from env (default 15s). Set to 0 to disable."""
+    try:
+        val = float(_os.environ.get("WS_KEEPALIVE_INTERVAL", "15"))
+        return max(0, val)
+    except ValueError:
+        return 15.0
+
+
 class WsStream:
     """
     Minimal RFC 6455 WebSocket client over asyncio TLS, presenting
@@ -122,6 +135,10 @@ class WsStream:
     echoed and surface as asyncio.IncompleteReadError — the exact
     signal Telethon's recv loop maps to "server closed the
     connection", so reconnects behave like any TCP drop.
+
+    v3.2.9: Adds outgoing ping/keepalive to prevent idle timeouts on
+    Cloudflare edge / Telegram WebSocket endpoints. Configurable via
+    WS_KEEPALIVE_INTERVAL environment variable (default 15s, 0 = disable).
     """
 
     def __init__(self, host: str, path: str, log=None):
@@ -132,6 +149,9 @@ class WsStream:
         self._tr_writer: asyncio.StreamWriter | None = None
         self._buf = bytearray()
         self._eof = False
+        # v3.2.9: keepalive task
+        self._keepalive_task: asyncio.Task | None = None
+        self._keepalive_interval = _get_keepalive_interval()
 
     # ── connect / handshake ─────────────────────────────────────
 
@@ -205,6 +225,13 @@ class WsStream:
         # per RFC 6455 that means "subprotocol declined", and the
         # binary channel works regardless (verified live), so a
         # missing echo is not an error.
+
+        # v3.2.9: Start keepalive task if enabled
+        if self._keepalive_interval > 0:
+            self._keepalive_task = asyncio.create_task(
+                self._keepalive_loop(),
+                name=f"ws_keepalive_{self._host}"
+            )
 
     # ── writer surface (sync write + async drain, like StreamWriter) ──
 
@@ -299,6 +326,11 @@ class WsStream:
     # ── close surface ────────────────────────────────────────────
 
     def close(self) -> None:
+        # v3.2.9: Cancel keepalive task first
+        if self._keepalive_task is not None and not self._keepalive_task.done():
+            self._keepalive_task.cancel()
+            self._keepalive_task = None
+
         if self._tr_writer is None or self._tr_writer.is_closing():
             return
         try:  # best-effort clean close frame (masked, empty payload)
@@ -309,6 +341,47 @@ class WsStream:
 
     async def wait_closed(self) -> None:
         await self._tr_writer.wait_closed()
+
+    # ── v3.2.9: Keepalive / ping loop ─────────────────────────────────────
+
+    async def _keepalive_loop(self) -> None:
+        """
+        Send periodic WebSocket ping frames to keep the connection alive
+        through Cloudflare edge / Telegram WebSocket idle timeouts.
+
+        Runs at _keepalive_interval seconds (default 15, configurable via
+        WS_KEEPALIVE_INTERVAL env var). Set to 0 to disable.
+        """
+        if self._log:
+            self._log.info("WebSocket keepalive started for %s (interval=%.1fs)", self._host, self._keepalive_interval)
+        try:
+            while not self._eof and self._tr_writer is not None and not self._tr_writer.is_closing():
+                await asyncio.sleep(self._keepalive_interval)
+                if self._eof or self._tr_writer is None or self._tr_writer.is_closing():
+                    break
+                try:
+                    # Send ping frame (opcode 0x9) with empty payload, masked
+                    mask = os.urandom(4)
+                    ping_frame = b"\x89\x80" + mask  # FIN + ping opcode, length 0, masked
+                    self._tr_writer.write(ping_frame)
+                    await self._tr_writer.drain()
+                    if self._log:
+                        self._log.debug("WebSocket ping sent to %s", self._host)
+                except Exception as exc:
+                    if self._log:
+                        self._log.warning("WebSocket ping failed: %s", exc)
+                    # Connection likely dead; readexactly will surface the error
+                    break
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            if self._log:
+                self._log.warning("Keepalive loop error: %s", exc)
+            # Keepalive loop failure shouldn't crash the connection
+            pass
+        finally:
+            if self._log:
+                self._log.info("WebSocket keepalive stopped for %s", self._host)
 
 
 class _ConnectionWsBase(ObfuscatedConnection):

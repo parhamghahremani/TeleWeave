@@ -250,6 +250,17 @@ _MIN_DEGRADED_INTERVAL: float = 5.0
 #: TCP connect, never a Telegram API call — see _cheap_probe_online().
 _PROBE_INTERVAL: float = _env_float("FAST_RECONNECT_PROBE_INTERVAL", 3.0)
 
+# ─── v3.2.9: CF-mode specific configuration ───────────────────────────────
+# Cloudflare WebSocket connections have shorter idle timeouts and need
+# more frequent health checks. These are used when ConnectionSettings.is_cf() is True.
+
+#: Health check interval for CF mode when connection appears healthy (seconds).
+#: Default 10s (vs 30s for direct/socks5) to detect WebSocket drops faster.
+_CF_HEALTHY_INTERVAL: float = _env_float("FAST_RECONNECT_CF_HEALTHY_INTERVAL", 10.0)
+
+#: Minimum degraded interval for CF mode (seconds).
+_CF_MIN_DEGRADED_INTERVAL: float = 3.0
+
 
 # ── Authorization loss (v3.1.10) ─────────────────────────────────────────────
 
@@ -626,24 +637,28 @@ class AccountReconnector:
 
     async def _interruptible_healthy_wait(self) -> None:
         """
-        v3.1.1 — Wait `_HEALTHY_INTERVAL` seconds, same as before, but wake
-        immediately if `_disconnect_event` fires in the meantime.
+        v3.1.1 — Wait healthy interval seconds, but wake immediately if
+        `_disconnect_event` fires in the meantime.
 
-        Falls back to a plain `asyncio.sleep(_HEALTHY_INTERVAL)` — byte-for-
-        byte the v3.1.0 behavior — when `FAST_RECONNECT_ENABLED` is false.
+        v3.2.9: Uses CF-specific interval when in Cloudflare mode (default 10s
+        vs 30s for direct/socks5) to detect WebSocket drops faster.
 
-        Waking early here does not itself trigger recovery: it simply
-        returns control to `_reconnect_cycle()`, whose very next iteration
-        re-checks `client.is_connected()` (Step 1) and will correctly route
-        into `_recover_connection()` on its own. This deliberately reuses
-        the existing, already-correct escalation path instead of adding a
-        second one.
+        Falls back to a plain `asyncio.sleep(interval)` when
+        `FAST_RECONNECT_ENABLED` is false.
         """
+        # v3.2.9: Select interval based on connection mode
+        if self._conn is not None and self._conn.is_cf():
+            healthy_interval = _CF_HEALTHY_INTERVAL
+            min_degraded = _CF_MIN_DEGRADED_INTERVAL
+        else:
+            healthy_interval = _HEALTHY_INTERVAL
+            min_degraded = _MIN_DEGRADED_INTERVAL
+
         if not _FAST_RECONNECT_ENABLED:
-            await asyncio.sleep(_HEALTHY_INTERVAL)
+            await asyncio.sleep(healthy_interval)
             return
 
-        sleep_task = asyncio.ensure_future(asyncio.sleep(_HEALTHY_INTERVAL))
+        sleep_task = asyncio.ensure_future(asyncio.sleep(healthy_interval))
         event_task = asyncio.ensure_future(self._disconnect_event.wait())
         try:
             done, _pending = await asyncio.wait(
@@ -782,16 +797,17 @@ class AccountReconnector:
             await self._recover_connection()
         else:
             # Minor issue — use adaptive shorter interval for faster detection
-            # Formula: 30s / (failures+1), but at least 5s
-            # failures=1 → 15s, failures=2 → recovery (handled above)
-            # v3.1.1: intentionally NOT routed through the interruptible
-            # wait — this interval is already short (≤15s) and this path
-            # is a one-cycle grace period before escalation, not a
-            # multi-minute backoff, so there is little to gain and it
-            # keeps this branch's behavior identical to v3.1.0.
+            # v3.2.9: Use CF-specific intervals when in Cloudflare mode
+            if self._conn is not None and self._conn.is_cf():
+                min_degraded = _CF_MIN_DEGRADED_INTERVAL
+                healthy_interval = _CF_HEALTHY_INTERVAL
+            else:
+                min_degraded = _MIN_DEGRADED_INTERVAL
+                healthy_interval = _HEALTHY_INTERVAL
+
             interval = max(
-                _MIN_DEGRADED_INTERVAL,
-                _HEALTHY_INTERVAL / (self._consecutive_failures + 1),
+                min_degraded,
+                healthy_interval / (self._consecutive_failures + 1),
             )
             self._log.debug("Minor issue — re-checking in %.1fs.", interval)
             await asyncio.sleep(interval)
@@ -1002,6 +1018,18 @@ class AccountReconnector:
             self._auth_failures = 0
             self._notify(connected=True)
 
+        except errors.AuthKeyError as exc:
+            # AuthKeyDuplicatedError (406) and other AuthKeyError subclasses
+            # (SESSION_REVOKED, AUTH_KEY_UNREGISTERED, etc.) are permanent
+            # authorization losses. Tenacity must not retry — convert to
+            # _AuthorizationLost so run() applies the escalating backoff.
+            try:
+                await asyncio.wait_for(new_client.disconnect(), timeout=3.0)
+            except Exception:
+                pass
+            raise _AuthorizationLost(
+                f"[Account{self._cfg.index}] Authorization lost: {exc}"
+            ) from exc
         except Exception:
             # Clean up the failed client so the NEXT attempt starts fresh.
             # The 1 s extra sleep here stacks with tenacity's own wait,

@@ -1,5 +1,5 @@
 /**
- * Telegram WebSocket Relay Worker — userbot_own v3.2.7 "cf" mode
+ * Telegram WebSocket Relay Worker — userbot_own v3.2.9 "cf" mode
  * ============================================================
  *
  * Purpose
@@ -31,7 +31,7 @@
  * Deploy (dash.cloudflare.com, free plan is fine — 100k req/day):
  *   1. Workers & Pages → Create → Worker → name it (e.g. "userbot-relay")
  *   2. "Edit code" → paste this entire file → Deploy
- *   3. Note the URL: https://userbot-relay.<your-subdomain>.workers.dev
+ *   3. Note the URL: https://userbot-relay.<your-subdomain>.worksers.dev
  *   4. In the userbot: run.bat → Settings → Connection mode →
  *      "Cloudflare (CF Proxy)" → paste the domain
  *      (userbot-relay.<your-subdomain>.workers.dev)
@@ -46,9 +46,17 @@
 const ALLOWED_HOST = /^[a-z]+(-1)?\.web\.telegram\.org$/;
 const ALLOWED_HOST_PORT = /^([a-z]+)(-1)?\.web\.telegram\.org:(\d+)$/;
 
+// Keepalive interval for upstream connection (seconds)
+const UPSTREAM_PING_INTERVAL = 15;
+
 export default {
-  async fetch(request) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    // Health check endpoint — lightweight, no upstream dial.
+    if (url.pathname === "/health" || url.pathname === "/health/") {
+      return new Response("OK", { status: 200 });
+    }
 
     // Path: /<dc-host>[:port]/apiws
     const parts = url.pathname.split("/").filter(Boolean);
@@ -130,6 +138,10 @@ export default {
     const toBuf = (d) =>
       d instanceof Blob ? d.arrayBuffer() : Promise.resolve(d);
 
+    // Track connection state for coordinated close.
+    let clientClosed = false;
+    let upstreamClosed = false;
+
     // Pump bytes both directions, transparently. WebSocket messages
     // here are one duplex byte stream — MTProto's own transport
     // framing manages chunking; we relay frames as-is.
@@ -140,10 +152,15 @@ export default {
     });
     server.addEventListener("close", (a, b) => {
       const [code, reason] = closeArgs(a, b);
+      clientClosed = true;
       try { tg.close(code, reason); } catch (e) {}
       // allowHalfOpen disables the auto-reply, so complete THIS
       // side's close handshake too (silently ignored if already done).
       try { server.close(code, reason); } catch (e) {}
+      // If upstream also closed, nothing else to do.
+      if (upstreamClosed) {
+        // Both sides closed — connection fully torn down.
+      }
     });
 
     tg.addEventListener("message", (ev) => {
@@ -153,9 +170,20 @@ export default {
     });
     tg.addEventListener("close", (a, b) => {
       const [code, reason] = closeArgs(a, b);
+      upstreamClosed = true;
       try { server.close(code, reason); } catch (e) {}
       try { tg.close(code, reason); } catch (e) {}
+      // If client also closed, nothing else to do.
+      if (clientClosed) {
+        // Both sides closed — connection fully torn down.
+      }
     });
+
+    // Upstream keepalive: rely on Workers runtime automatic ping/pong
+    // after tg.accept(). The runtime handles WebSocket-level keepalive
+    // for the upstream connection. No manual ping loop needed —
+    // manual empty binary frames (opcode 0x2) are not proper ping frames
+    // (opcode 0x9) and may not reset Telegram/Cloudflare idle timers.
 
     return new Response(null, {
       status: 101,
