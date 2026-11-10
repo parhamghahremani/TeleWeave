@@ -1,6 +1,6 @@
 """
 userbot_own/core/connection_ws.py  (new in v3.2.7, Phase 3)
-═════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════
 MTProto over WebSocket ("cf" connection mode).
 
 Telegram's official web client reaches MTProto over a WebSocket
@@ -45,7 +45,7 @@ Public API (used by core/connection_selector.py):
         is configured, directly to web.telegram.org otherwise.
     ws_probe_target(conn)      → (host, port) for the reconnector's
         cheap probes.
-═════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════
 """
 from __future__ import annotations
 
@@ -131,7 +131,6 @@ def _xor_mask(data: bytes, key: bytes) -> bytes:
 # ─── v3.2.9: Keepalive configuration ──────────────────────────────────────
 # Can be overridden via environment variable for tuning
 import os as _os
-
 
 def _get_keepalive_interval() -> float:
     """Get ping interval from env (default 15s). Set to 0 to disable."""

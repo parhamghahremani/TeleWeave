@@ -1,5 +1,5 @@
 /**
- * Telegram WebSocket Relay Worker — userbot_own v3.2.10 "cf" mode
+ * Telegram WebSocket Relay Worker — userbot_own v3.2.9 "cf" mode
  * ============================================================
  *
  * Purpose

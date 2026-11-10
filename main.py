@@ -22,4 +22,12 @@ sys.dont_write_bytecode = True  # Prevent __pycache__ folders
 from userbot_own.app.application import main  # noqa: E402 — must follow dont_write_bytecode above
 
 if __name__ == "__main__":
+    # Handle help at launcher level for consistency
+    if len(sys.argv) > 1 and sys.argv[1] in ("help", "--help", "-h"):
+        print("Usage: python main.py [help]\n")
+        print("No args      start the userbot")
+        print()
+        print("Commands:")
+        print("  help          show this help and exit")
+        sys.exit(0)
     main()

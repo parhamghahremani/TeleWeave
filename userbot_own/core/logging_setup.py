@@ -137,10 +137,28 @@ _TERMINAL_NOISE_PATTERNS: tuple[str, ...] = (
     "Server resent the older message",
 )
 
+# v3.2.10: Patterns to demote from INFO to DEBUG in terminal (still INFO in files)
+# These are Telethon's internal WebSocket connection logs that flood the terminal.
+_TERMINAL_DEMOTE_PATTERNS: tuple[str, ...] = (
+    "Connecting to wss://",
+    "Connection to wss://",
+    " complete!",
+    "Disconnecting from wss://",
+    "Getting difference for channel",
+    "Got difference for channel",
+    "Getting difference for account",
+    "Got difference for account",
+)
+
 
 def _is_terminal_noise(message: str) -> bool:
     """B-JL-05: Check if a message should be suppressed from terminal output."""
     return any(pattern in message for pattern in _TERMINAL_NOISE_PATTERNS)
+
+
+def _should_demote_to_debug(message: str) -> bool:
+    """v3.2.10: Check if a message should be demoted from INFO to DEBUG for terminal."""
+    return any(pattern in message for pattern in _TERMINAL_DEMOTE_PATTERNS)
 
 class InterceptHandler(logging.Handler):
     """
@@ -157,6 +175,12 @@ class InterceptHandler(logging.Handler):
         except ValueError:
             level = record.levelno
 
+        # v3.2.10: Demote specific Telethon WebSocket connection logs from
+        # INFO to DEBUG for terminal (file logs keep original level).
+        message = record.getMessage()
+        if _should_demote_to_debug(message) and level == "INFO":
+            level = "DEBUG"
+
         # Find the frame that actually issued the log call, skipping over
         # logging internals. Guard against f_back being None (top of stack)
         # and normalise the filename so that .pyc and .py both match.
@@ -172,7 +196,7 @@ class InterceptHandler(logging.Handler):
             break
 
         logger.opt(depth=depth, exception=record.exc_info).log(
-            level, record.getMessage()
+            level, message
         )
 
 
@@ -320,6 +344,9 @@ def setup(
     )
 
     # â”€â”€ Console handler for intercepted logs (telethon, etc.) â”€â”€
+    # v3.2.10: Respect terminal_level so external library connection logs
+    # (e.g., "Connecting to wss://...", "Connection to ... complete!") only
+    # appear in terminal when DEBUG is enabled, matching the main app sink.
     logger.add(
         sys.stderr,
         format=(
@@ -328,7 +355,7 @@ def setup(
             "<yellow>{name}</yellow> | "
             "<level>{message}</level>"
         ),
-        level="INFO",  # Allow INFO+ for external libraries (e.g., WebSocket keepalive)
+        level=terminal_level.upper(),
         colorize=True,
         backtrace=False,
         diagnose=False,
@@ -340,6 +367,7 @@ def setup(
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Main app logs (with 'name' in extra)
         logger.add(
             str(log_path),
             format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {extra[name]} | {message}",
@@ -353,6 +381,24 @@ def setup(
             filter=lambda record: "name" in record["extra"],
             # v3.1.9: offload file I/O to a background thread so it
             # can never block the event loop (see module docstring).
+            enqueue=True,
+        )
+
+        # Third-party/intercepted logs (no 'name' in extra) — written to same
+        # file at original level (INFO+), not demoted. Separate filter keeps
+        # the main app format clean while preserving full detail for external
+        # libraries like Telethon.
+        logger.add(
+            str(log_path),
+            format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name} | {message}",
+            level=log_level.upper(),
+            rotation="10 MB",
+            retention="7 days",
+            compression="zip",
+            encoding="utf-8",
+            backtrace=False,
+            diagnose=False,
+            filter=lambda record: "name" not in record["extra"],
             enqueue=True,
         )
 

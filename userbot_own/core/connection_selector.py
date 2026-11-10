@@ -1,6 +1,6 @@
 """
 userbot_own/core/connection_selector.py  (new in v3.2.7)
-═════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════
 Connection-mode selection — the single place that turns a
 ConnectionSettings instance into Telethon constructor arguments.
 
@@ -33,7 +33,7 @@ Public API:
         ("connection" and optionally "proxy" kwargs)
     probe_host_port(conn) → (host, port)
         what the reconnector's cheap probes should test in this mode
-═════════════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════════
 """
 from __future__ import annotations
 

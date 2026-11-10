@@ -60,6 +60,7 @@ exit /b 1
 :settings_dispatch
 if "%~2"=="" goto :settings
 python settings.py %~2 %~3 %~4 %~5 %~6 %~7 %~8 %~9
+pause
 exit /b 0
 
 :menu
@@ -92,13 +93,15 @@ echo.
 echo  ── Starting the bot (main.py) ... press Ctrl+C to stop ──
 echo.
 cmd /c python main.py
-goto :after_run
+pause
+goto :menu
 
 :accounts
 echo.
 echo  ── Starting account manager ... press Ctrl+C to stop ──
 echo.
 cmd /c python -m userbot_own.account_management.cli
+pause
 goto :menu
 
 rem ── Connection settings ─────────────────────────────────────────
@@ -126,10 +129,8 @@ goto :settings_show
 
 :settings_show
 python settings.py show
+pause
 goto :settings
-
-rem  The mode choices live one level deeper, selected from their
-rem  own menu — same layout as the interactive settings.py menu.
 
 :settings_mode
 cls
@@ -169,6 +170,7 @@ goto :settings_mode
 
 :settings_test
 python settings.py test
+pause
 goto :settings
 
 :reinstall

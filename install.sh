@@ -276,17 +276,80 @@ cat > "$LAUNCHER_DEST" << LAUNCHEREOF
 # Edit install.sh and re-run the installer to regenerate this file.
 
 INSTALL_DIR="${INSTALL_DIR}"
-VENV_PY="\${INSTALL_DIR}/.venv/bin/python"
+VENV_PY="${INSTALL_DIR}/.venv/bin/python"
 MAIN_PY="${MAIN_PY}"
 ADD_ACCOUNT_PY="${ADD_ACCOUNT_PY}"
 SETTINGS_PY="${SETTINGS_PY}"
 RUN_DIR="${RUN_DIR}"
-VERSION_FILE="\${INSTALL_DIR}/VERSION"
+VERSION_FILE="${INSTALL_DIR}/VERSION"
 
-G="\033[32m"; Y="\033[33m"; E="\033[31m"; B="\033[1m"; R="\033[0m"
+G="\033[32m"; Y="\033[33m"; E="\033[31m"; B="\033[1m"; R="\033[0m"; C="\033[36m"
 
 current_version() {
   [ -f "\$VERSION_FILE" ] && cat "\$VERSION_FILE" || echo "unknown"
+}
+
+pause() {
+  printf "\n\${Y}Press Enter to continue...\${R}"
+  read -r
+}
+
+print_help() {
+  cat << 'HELPEOF'
+${B}userbot_own v$(current_version) — Command Reference${R}
+
+${C}Usage:${R}
+  userbot [command] [args...]
+
+${C}Commands:${R}
+  ${B}run${R}                    Start the userbot (main.py)
+  ${B}add${R}                    Manage accounts (add_account.py)
+  ${B}settings${R} [cmd]         Connection settings menu or subcommand
+  ${B}reinstall${R}              Full reinstall (checks Python/git/venv)
+  ${B}version${R}                Show version and exit
+  ${B}help${R}                   Show this help message
+
+${C}Settings subcommands (also work as: userbot settings <cmd>):${R}
+  ${B}show${R}                   Print current connection settings
+  ${B}set-direct${R}             Switch to direct connection (no proxy)
+  ${B}set-socks5${R} [host port [user] [pass]]
+                               Switch to SOCKS5 proxy (prompts if args omitted)
+  ${B}set-cf-no-worker${R}       CF mode via Telegram's official endpoints
+  ${B}set-cf-worker${R} [domain] CF mode via personal relay Worker (prompts if omitted)
+  ${B}test${R}                   Live connection test of active route
+
+${C}Interactive menus (no args):${R}
+  ${B}userbot${R}                Main menu (single keypress, no Enter)
+  ${B}userbot settings${R}       Connection settings menu (single keypress)
+  ${B}userbot add${R}            Account management menu (single keypress)
+
+${C}Account management (interactive):${R}
+  1) Add new account (full login or import string session)
+  2) Re-login / recreate session
+  3) Edit account details (api_id, api_hash, phone, label)
+  4) Remove account
+  5) List accounts
+  6) Verify session
+
+${C}Connection settings (interactive):${R}
+  1) Show current settings
+  2) Change connection mode
+     1) Direct connection
+     2) SOCKS5 proxy (prompts for host/port/user/pass)
+     3) Cloudflare - without Worker (official endpoints)
+     4) Cloudflare - with Worker (prompts for Worker domain)
+     5) Back to Connection Settings
+  3) Test connection
+  4) Back to main menu
+
+${C}Notes:${R}
+  • All menus use single keypress (no Enter needed) when run in a TTY
+  • Invalid input in menus clears and re-prompts automatically
+  • Ctrl+C during a running task returns to the launching menu
+  • Connection mode is system-wide (applies to bot + account manager)
+  • Data preserved on update: accounts/, .env, data/ folders
+
+HELPEOF
 }
 
 # Sanity check — clear error instead of a cryptic Python traceback
@@ -306,32 +369,26 @@ fi
 case "\${1:-}" in
   run)
     cd "\$RUN_DIR"
-    exec "\$VENV_PY" "\$MAIN_PY"
+    "\$VENV_PY" "\$MAIN_PY"
+    pause
     ;;
   add)
     cd "\$RUN_DIR"
-    exec "\$VENV_PY" "\$ADD_ACCOUNT_PY"
+    "\$VENV_PY" "\$ADD_ACCOUNT_PY"
+    pause
     ;;
   settings)
     # Connection settings (v3.2.7): system-wide direct / SOCKS5 / CF mode.
-    # Extra args pass through, so `userbot settings show` / set-direct /
+    # Extra args pass through, so \`userbot settings show\` / set-direct /
     # set-socks5 / set-cf-no-worker / set-cf-worker / test all work.
     cd "\$RUN_DIR"
     if [ "\$#" -ge 2 ]; then
       shift
-      exec "\$VENV_PY" "\$SETTINGS_PY" "\$@"
+      "\$VENV_PY" "\$SETTINGS_PY" "\$@"
+      pause
     fi
-    exec "\$VENV_PY" "\$SETTINGS_PY"
-    ;;
-  update)
-    # Fast path: run the lightweight updater already on disk (git sync +
-    # deps + cache clear), NOT the full installer. Falls back to the full
-    # installer only if update.sh is missing (e.g. a very old install).
-    if [ -f "\${INSTALL_DIR}/update.sh" ]; then
-      exec bash "\${INSTALL_DIR}/update.sh"
-    else
-      exec bash -c 'curl -fsSL https://raw.githubusercontent.com/pppppuhdtxd/userbot_own/main/install.sh | bash'
-    fi
+    "\$VENV_PY" "\$SETTINGS_PY"
+    pause
     ;;
   reinstall)
     # Full reinstall: re-checks Python/git/venv from scratch. Slower —
@@ -342,34 +399,76 @@ case "\${1:-}" in
     printf "userbot_own version %s\n" "\$(current_version)"
     exit 0
     ;;
+  help|--help|-h)
+    print_help
+    exit 0
+    ;;
   "")
     # Interactive menu — single keypress, no Enter needed.
-    printf "\n\${B}=== userbot_own — v%s ===\${R}\n" "\$(current_version)"
-    printf "1) Run bot\n"
-    printf "2) Manage accounts\n"
-    printf "3) Connection settings (direct / SOCKS5 / CF)\n"
-    printf "4) Update\n"
-    printf "5) Quit\n"
-    printf "Your choice [1-5]: "
-    read -r -n 1 choice
-    printf "\n"
-    case "\$choice" in
-      1) cd "\$RUN_DIR" && exec "\$VENV_PY" "\$MAIN_PY" ;;
-      2) cd "\$RUN_DIR" && exec "\$VENV_PY" "\$ADD_ACCOUNT_PY" ;;
-      3) cd "\$RUN_DIR" && exec "\$VENV_PY" "\$SETTINGS_PY" ;;
-      4)
-        if [ -f "\${INSTALL_DIR}/update.sh" ]; then
-          exec bash "\${INSTALL_DIR}/update.sh"
-        else
-          exec bash -c 'curl -fsSL https://raw.githubusercontent.com/pppppuhdtxd/userbot_own/main/install.sh | bash'
-        fi
-        ;;
-      5) exit 0 ;;
-      *) printf "Invalid option.\n"; exit 1 ;;
-    esac
+    # Matches run.bat behavior: invalid input clears and re-prompts,
+    # Connection Settings submenu returns to itself for chaining changes.
+    while true; do
+      printf "\n\${B}=== userbot_own — v%s ===${R}\n" "\$(current_version)"
+      printf "1) Run bot\n"
+      printf "2) Manage accounts\n"
+      printf "3) Connection settings\n"
+      printf "4) Update\n"
+      printf "5) Quit\n"
+      printf "Your choice [1-5]: "
+      read -r -n 1 choice
+      printf "\n"
+      case "\$choice" in
+        1) cd "\$RUN_DIR" && "\$VENV_PY" "\$MAIN_PY" ; pause ;;
+        2) cd "\$RUN_DIR" && "\$VENV_PY" "\$ADD_ACCOUNT_PY" ; pause ;;
+        3)
+          # Connection settings submenu — matches run.bat exactly:
+          # every action returns HERE so several settings can be changed in a row.
+          while true; do
+            printf "\n\${B}=== Connection Settings ===${R}\n"
+            printf "1) Show current settings\n"
+            printf "2) Change connection mode\n"
+            printf "3) Test connection\n"
+            printf "4) Back to main menu\n"
+            printf "Your choice [1-4]: "
+            read -r -n 1 subchoice
+            printf "\n"
+            case "\$subchoice" in
+              1) cd "\$RUN_DIR" && "\$VENV_PY" "\$SETTINGS_PY" show ; pause ;;
+              2)
+                # Change connection mode submenu
+                while true; do
+                  printf "\n\${B}=== Change Connection Mode ===${R}\n"
+                  printf "1) Direct connection\n"
+                  printf "2) SOCKS5 proxy\n"
+                  printf "3) Cloudflare - without Worker (official endpoints)\n"
+                  printf "4) Cloudflare - with Worker\n"
+                  printf "5) Back to Connection Settings\n"
+                  printf "Your choice [1-5]: "
+                  read -r -n 1 modechoice
+                  printf "\n"
+                  case "\$modechoice" in
+                    1) cd "\$RUN_DIR" && "\$VENV_PY" "\$SETTINGS_PY" set-direct ;;
+                    2) cd "\$RUN_DIR" && "\$VENV_PY" "\$SETTINGS_PY" set-socks5 ;;
+                    3) cd "\$RUN_DIR" && "\$VENV_PY" "\$SETTINGS_PY" set-cf-no-worker ;;
+                    4) cd "\$RUN_DIR" && "\$VENV_PY" "\$SETTINGS_PY" set-cf-worker ;;
+                    5) break ;;  # Return to Connection Settings
+                    *) printf "Invalid option.\n"; continue ;;
+                  esac
+                done
+                ;;
+              3) cd "\$RUN_DIR" && "\$VENV_PY" "\$SETTINGS_PY" test ; pause ;;
+              4) break ;;  # Return to main menu
+              *) printf "Invalid option.\n"; continue ;;
+            esac
+          done
+          ;;
+        4) exit 0 ;;
+        *) printf "Invalid option.\n"; continue ;;
+      esac
+    done
     ;;
   *)
-    printf "Usage: userbot [run|add|settings [command]|update|reinstall|version]\n"
+    printf "Usage: userbot [run|add|settings [command]|reinstall|version|help]\n"
     exit 1
     ;;
 esac

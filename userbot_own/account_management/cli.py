@@ -153,6 +153,71 @@ def _ask(prompt: str, default: str = "", secret: bool = False) -> str:
         raise
 
 
+# ── Single-keypress input (run.bat-style, like settings_menu/cli.py) ────────────
+
+def _read_key() -> str:
+    """
+    ONE keypress, no Enter needed — the run.bat-style input.
+    Returns '' when a raw keypress is impossible (no TTY:
+    piped/redirected stdin, or the platform library is missing) so the
+    caller can fall back to classic line input.
+
+    Ctrl+C / Ctrl+D are translated to KeyboardInterrupt / EOFError:
+    in raw mode the terminal no longer turns them into signals, and
+    the existing cancellation handling relies on those exceptions.
+    """
+    if not sys.stdin.isatty():
+        return ""
+    if sys.platform == "win32":
+        try:
+            import msvcrt
+        except ImportError:
+            return ""
+        try:
+            ch = msvcrt.getwch()
+            if ch in ("\x00", "\xe0"):
+                msvcrt.getwch()  # arrow/function key: swallow the 2nd half
+                return ""
+        except (OSError, ValueError):
+            return ""
+    else:
+        try:
+            import termios
+            import tty
+        except ImportError:
+            return ""
+        try:
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                ch = sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        except (termios.error, ValueError, OSError):
+            return ""
+    if ch == "\x03":  # Ctrl+C
+        raise KeyboardInterrupt
+    if ch == "\x04":  # Ctrl+D
+        raise EOFError
+    return ch
+
+
+def _ask_choice() -> str:
+    """
+    The menu key: one keypress when a TTY allows it, line input
+    otherwise (piped stdin keeps the menu scriptable/testable).
+    """
+    print(f"{C.BOLD}  Your choice [1-7]: {C.RESET}", end="", flush=True)
+    key = _read_key()
+    if key:
+        print(key)  # raw mode doesn't echo, so show what was pressed
+        return key
+    # No TTY (or library missing): classic line input still works —
+    # the prompt is already printed, so read the line bare.
+    return input().strip()
+
+
 def _confirm(prompt: str, default: bool = False) -> bool:
     """Ask for yes/no confirmation."""
     hint = "Y/n" if default else "y/N"
@@ -1355,7 +1420,7 @@ async def _main() -> None:
         print()
 
         try:
-            choice = _ask("Choice", default="1")
+            choice = _ask_choice()
         except (KeyboardInterrupt, EOFError):
             print()
             _info("Goodbye.")
@@ -1376,25 +1441,30 @@ async def _main() -> None:
                 await _action_list()
             elif choice == "6":
                 await _action_verify()
-            elif choice in ("7", "q", "exit", "quit"):
+            elif choice in ("7", "q", "Q"):
                 _info("Goodbye.")
                 break
             else:
-                _err(f"Unknown option: '{choice}'. Enter 1–7.")
+                _err(f"Unknown option: '{choice}' — enter 1 to 7.")
         except (KeyboardInterrupt, EOFError):
             print()
             _warn("Operation cancelled.")
 
-        print()
-        try:
-            if not _confirm("Return to main menu?", default=True):
-                _info("Goodbye.")
-                break
-        except (KeyboardInterrupt, EOFError):
-            break
+        # Always return to main menu (no confirmation prompt like settings_menu)
 
 
 def main() -> None:
+    # Windows consoles and redirected pipes can default to legacy
+    # single-byte code pages (cp1252/437), where the box-drawing
+    # characters in the menu output raise UnicodeEncodeError. Force
+    # UTF-8 on the three text streams so the output never depends on
+    # the host console's code page.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        except (AttributeError, ValueError, OSError):
+            pass
+
     try:
         asyncio.run(_main())
     except KeyboardInterrupt:
