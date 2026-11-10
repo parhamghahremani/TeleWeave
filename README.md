@@ -27,7 +27,7 @@ userbot
 You'll get an interactive menu:
 
 ```
-=== userbot_own — v3.2.8 ===
+=== userbot_own — v3.2.10 ===
 1) Run bot
 2) Manage accounts
 3) Connection settings (direct / SOCKS5 / CF)
@@ -78,7 +78,7 @@ Termux/Debian/Ubuntu), see the [Quick Start](#quick-start) section below.
 A professional, async, hot-reload-capable Telegram account management system
 built with Python 3.11+ and [Telethon](https://docs.telethon.dev/).
 
-**Current version:** `3.2.9`
+**Current version:** `3.2.10`
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

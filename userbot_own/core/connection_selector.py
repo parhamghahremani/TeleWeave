@@ -1,6 +1,6 @@
 """
 userbot_own/core/connection_selector.py  (new in v3.2.7)
-════════════════════════════════════════════════════════════════
+═════════════════════════════════════════════════════════════════
 Connection-mode selection — the single place that turns a
 ConnectionSettings instance into Telethon constructor arguments.
 
@@ -33,10 +33,11 @@ Public API:
         ("connection" and optionally "proxy" kwargs)
     probe_host_port(conn) → (host, port)
         what the reconnector's cheap probes should test in this mode
-════════════════════════════════════════════════════════════════
+═════════════════════════════════════════════════════════════════
 """
 from __future__ import annotations
 
+import re
 from telethon.network.connection import ConnectionTcpFull
 
 from userbot_own.config.models import ConnectionSettings
@@ -49,6 +50,24 @@ from userbot_own.core.connection_ws import (
     make_ws_connection_class,
     ws_probe_target,
 )
+
+# Worker domain normalization: accept "domain", "domain/", "https://domain",
+# "https://domain/", and strip to bare hostname. Same pattern as
+# settings_menu/cli.py's _DOMAIN_CLEAN_RE.
+_WORKER_DOMAIN_RE = re.compile(
+    r"^\s*(?:https?://)?([a-z0-9.-]+?\.[a-z]{2,})\s*/?\s*$", re.IGNORECASE
+)
+
+
+def _normalize_worker_domain(domain: str) -> str:
+    """
+    Normalize a worker domain to bare hostname.
+    - Strips http:// or https:// prefix
+    - Strips trailing slash
+    - Returns lowercase bare hostname
+    """
+    m = _WORKER_DOMAIN_RE.match(domain)
+    return m.group(1).lower() if m else domain.lower().rstrip("/")
 
 
 def connection_mode_kwargs(
@@ -98,7 +117,21 @@ def connection_mode_kwargs(
         # `default_connection` is ignored on purpose: cf has its own
         # transport (obfuscated2-over-WS reuses Telethon's stack, but
         # the socket layer is WsStream, not a TCP transport class).
-        return {"connection": make_ws_connection_class(conn)}
+        # v3.2.10: Normalize worker domain to handle trailing slashes and http:// prefixes
+        normalized_conn = conn
+        if conn.cf_worker_domain:
+            normalized_domain = _normalize_worker_domain(conn.cf_worker_domain)
+            if normalized_domain != conn.cf_worker_domain:
+                from userbot_own.config.models import ConnectionSettings
+                normalized_conn = ConnectionSettings(
+                    mode=conn.mode,
+                    socks_host=conn.socks_host,
+                    socks_port=conn.socks_port,
+                    socks_user=conn.socks_user,
+                    socks_pass=conn.socks_pass,
+                    cf_worker_domain=normalized_domain,
+                )
+        return {"connection": make_ws_connection_class(normalized_conn)}
 
     # "direct" — pre-3.2.7 behavior exactly, whether by choice or by
     # fallback (socks5 selected but host empty → treated as direct).

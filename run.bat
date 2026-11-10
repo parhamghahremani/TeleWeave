@@ -4,23 +4,27 @@ chcp 65001 >nul
 
 rem ────────────────────────────────────────────────────────────────
 rem  Interactive launcher menu for the userbot project.
-rem  - Option 1  -> python main.py         (run the bot)
-rem  - Option 2  -> python add_account.py  (account management)
+rem  - Option 1  -> python main.py                  (run the bot)
+rem  - Option 2  -> python -m userbot_own.account_management.cli  (account management)
 rem  - Option 3  -> connection settings sub-menu (show / change
 rem                 mode / test); every action returns to that
-rem                 sub-menu, [4] Back returns to the main menu
+rem                 sub-menu, [7] Back returns to the main menu
 rem  - Option 4  -> exit
 rem  While a task runs, press Ctrl+C to stop it and return to the
 rem  menu you launched it from (answer "N" to the "Terminate batch
 rem  job (Y/N)?" prompt).
+rem  Supports command-line arguments:
+rem    run.bat run                    - run the bot
+rem    run.bat add                    - account management
+rem    run.bat settings [cmd]         - connection settings
+rem    run.bat reinstall              - full reinstall
+rem    run.bat version                - show version
+rem    run.bat help                   - show help
 rem ────────────────────────────────────────────────────────────────
 
 rem Always work from the folder this .bat lives in, so relative
 rem imports and config paths resolve correctly no matter how it's launched.
 cd /d "%~dp0"
-
-rem Prevent __pycache__ directories from being created during execution
-set PYTHONDONTWRITEBYTECODE=1
 
 rem Prevent __pycache__ directories from being created during execution
 set PYTHONDONTWRITEBYTECODE=1
@@ -39,15 +43,34 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem --- Dispatch on first argument (optional shortcuts) ---
+if "%~1"=="" goto :menu
+if /i "%~1"=="run" goto :bot
+if /i "%~1"=="add" goto :accounts
+if /i "%~1"=="settings" goto :settings_dispatch
+if /i "%~1"=="reinstall" goto :reinstall
+if /i "%~1"=="version" goto :version
+if /i "%~1"=="help" goto :help
+if /i "%~1"=="-h" goto :help
+if /i "%~1"=="--help" goto :help
+echo Unknown command: %~1
+echo Usage: run.bat [run|add|settings [command]|reinstall|version|help]
+exit /b 1
+
+:settings_dispatch
+if "%~2"=="" goto :settings
+python settings.py %~2 %~3 %~4 %~5 %~6 %~7 %~8 %~9
+exit /b 0
+
 :menu
 cls
 echo  ==============================================================
 echo           USERBOT  -  CONTROL  MENU  (v%APP_VERSION%)
 echo  ==============================================================
 echo.
-echo    [1] Run the bot             (main.py)
-echo    [2] Manage accounts         (add_account.py)
-echo    [3] Connection settings      (show / change mode / test)
+echo    [1] Run the bot
+echo    [2] Manage accounts
+echo    [3] Connection settings
 echo    [4] Exit
 echo.
 echo  --------------------------------------------------------------
@@ -68,15 +91,15 @@ goto :menu
 echo.
 echo  ── Starting the bot (main.py) ... press Ctrl+C to stop ──
 echo.
-python main.py
+cmd /c python main.py
 goto :after_run
 
 :accounts
 echo.
-echo  ── Starting account manager (add_account.py) ... press Ctrl+C to stop ──
+echo  ── Starting account manager ... press Ctrl+C to stop ──
 echo.
-python add_account.py
-goto :after_run
+cmd /c python -m userbot_own.account_management.cli
+goto :menu
 
 rem ── Connection settings ─────────────────────────────────────────
 rem  Self-contained sub-menu: every action comes back HERE, so
@@ -84,13 +107,13 @@ rem  several settings can be checked/changed in a row. [4] Back is
 rem  the only way out to the main menu.
 
 :settings
-echo.
+cls
 echo  ==============================================================
 echo                     CONNECTION SETTINGS
 echo  ==============================================================
 echo.
 echo    [1] Show current settings
-echo    [2] Change connection mode  (direct / SOCKS5 / Cloudflare)
+echo    [2] Change connection mode
 echo    [3] Test connection
 echo    [4] Back to main menu
 echo.
@@ -109,16 +132,16 @@ rem  The mode choices live one level deeper, selected from their
 rem  own menu — same layout as the interactive settings.py menu.
 
 :settings_mode
+cls
+echo  ==============================================================
+echo                   CHANGE CONNECTION MODE
+echo  ==============================================================
 echo.
-echo  --------------------------------------------------------------
-echo   Choose the connection mode:
-echo  --------------------------------------------------------------
-echo.
-echo    [1] Direct connection (no proxy)
-echo    [2] SOCKS5 proxy (will prompt for details)
+echo    [1] Direct connection
+echo    [2] SOCKS5 proxy
 echo    [3] Cloudflare - without Worker (official endpoints)
-echo    [4] Cloudflare - with Worker (will prompt for domain)
-echo    [5] Back to Connection settings
+echo    [4] Cloudflare - with Worker
+echo    [5] Back to Connection Settings
 echo.
 choice /C 12345 /N /M "  Your choice [1-5]: "
 
@@ -130,23 +153,101 @@ goto :settings_direct
 
 :settings_direct
 python settings.py set-direct
-goto :settings
+goto :settings_mode
 
 :settings_socks5
 python settings.py set-socks5
-goto :settings
+goto :settings_mode
 
 :settings_cf_noworker
 python settings.py set-cf-no-worker
-goto :settings
+goto :settings_mode
 
 :settings_cf_worker
 python settings.py set-cf-worker
-goto :settings
+goto :settings_mode
 
 :settings_test
 python settings.py test
 goto :settings
+
+:reinstall
+echo.
+echo  ── Full reinstall ... ──
+echo.
+curl -fsSL https://raw.githubusercontent.com/pppppuhdtxd/userbot_own/main/install.sh | bash
+goto :menu
+
+:version
+echo userbot_own version %APP_VERSION%
+pause
+goto :menu
+
+:help
+cls
+echo  ==============================================================
+echo           USERBOT  -  COMMAND REFERENCE  (v%APP_VERSION%)
+echo  ==============================================================
+echo.
+echo  Usage: run.bat [command] [args...]
+echo.
+echo  Commands:
+echo    run                    Start the userbot (main.py)
+echo    add                    Manage accounts
+echo    settings [cmd]         Connection settings menu or subcommand
+echo    reinstall              Full reinstall
+echo    version                Show version
+echo    help                   Show this help message
+echo.
+echo  Settings subcommands (also work as: run.bat settings ^<cmd^>):
+echo    show                   Print current connection settings
+echo    set-direct             Switch to direct connection (no proxy)
+echo    set-socks5 [host port [user] [pass]]
+echo                           Switch to SOCKS5 proxy (prompts if args omitted)
+echo    set-cf-no-worker       CF mode via Telegram's official endpoints
+echo    set-cf-worker [domain] CF mode via personal relay Worker (prompts if omitted)
+echo    test                   Live connection test of active route
+echo.
+echo  Interactive menus (no args):
+echo    run.bat                Main menu (single keypress, no Enter)
+echo    run.bat settings       Connection settings menu (single keypress)
+echo    run.bat add            Account management menu (single keypress)
+echo.
+echo  Notes:
+echo    * All menus use single keypress (no Enter needed) in a TTY
+echo    * Invalid input in menus clears and re-prompts automatically
+echo    * Ctrl+C during a running task returns to the launching menu
+echo    * Connection mode is system-wide (applies to bot + account manager)
+echo    * Data preserved on update: accounts/, .env/, data/ folders
+echo.
+echo  Account management (interactive):
+echo    1) Add new account (full login or import string session)
+echo    2) Re-login / recreate session
+echo    3) Edit account details (api_id, api_hash, phone, label)
+echo    4) Remove account
+echo    5) List accounts
+echo    6) Verify session
+echo.
+echo  Connection settings (interactive):
+echo    1) Show current settings
+echo    2) Change connection mode
+echo       1) Direct connection
+echo       2) SOCKS5 proxy (prompts for host/port/user/pass)
+echo       3) Cloudflare - without Worker (official endpoints)
+echo       4) Cloudflare - with Worker (prompts for Worker domain)
+echo       5) Back to Connection Settings
+echo    3) Test connection
+echo    4) Back to main menu
+echo.
+echo  Notes:
+echo    * All menus use single keypress (no Enter needed) in a TTY
+echo    * Invalid input in menus clears and re-prompts automatically
+echo    * Ctrl+C during a running task returns to the launching menu
+echo    * Connection mode is system-wide (applies to bot + account manager)
+echo    * Data preserved on update: accounts/, .env/, data/ folders
+echo.
+pause
+goto :menu
 
 :after_run
 echo.

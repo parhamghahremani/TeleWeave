@@ -1,6 +1,6 @@
 """
 userbot_own/core/connection_ws.py  (new in v3.2.7, Phase 3)
-════════════════════════════════════════════════════════════════
+═════════════════════════════════════════════════════════════════
 MTProto over WebSocket ("cf" connection mode).
 
 Telegram's official web client reaches MTProto over a WebSocket
@@ -45,7 +45,7 @@ Public API (used by core/connection_selector.py):
         is configured, directly to web.telegram.org otherwise.
     ws_probe_target(conn)      → (host, port) for the reconnector's
         cheap probes.
-════════════════════════════════════════════════════════════════
+═════════════════════════════════════════════════════════════════
 """
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ import asyncio
 import base64
 import hashlib
 import os
+import re
 import ssl
 import struct
 
@@ -75,6 +76,23 @@ _DC_NAMES = {
 _WS_PORT = 443
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
+# Worker domain normalization: accept "domain", "domain/", "https://domain",
+# "https://domain/", and strip to bare hostname.
+_WORKER_DOMAIN_RE = re.compile(
+    r"^\s*(?:https?://)?([a-z0-9.-]+?\.[a-z]{2,})\s*/?\s*$", re.IGNORECASE
+)
+
+
+def _normalize_worker_domain(domain: str) -> str:
+    """
+    Normalize a worker domain to bare hostname.
+    - Strips http:// or https:// prefix
+    - Strips trailing slash
+    - Returns lowercase bare hostname
+    """
+    m = _WORKER_DOMAIN_RE.match(domain)
+    return m.group(1).lower() if m else domain.lower().rstrip("/")
+
 
 def dc_ws_host(dc_id: int) -> str:
     """Map a Telegram DC id to its official WebSocket endpoint host."""
@@ -87,9 +105,12 @@ def ws_probe_target(conn: ConnectionSettings) -> tuple[str, int]:
     host the client will actually connect to — the personal Worker
     when one is configured (its edge is what must be reachable),
     otherwise Telegram's own web endpoint.
+
+    v3.2.10: Normalizes worker domain to handle trailing slashes and http:// prefixes.
     """
     if conn.cf_worker_domain:
-        return (conn.cf_worker_domain, _WS_PORT)
+        normalized = _normalize_worker_domain(conn.cf_worker_domain)
+        return (normalized, _WS_PORT)
     return (dc_ws_host(2), _WS_PORT)
 
 
@@ -110,6 +131,7 @@ def _xor_mask(data: bytes, key: bytes) -> bytes:
 # ─── v3.2.9: Keepalive configuration ──────────────────────────────────────
 # Can be overridden via environment variable for tuning
 import os as _os
+
 
 def _get_keepalive_interval() -> float:
     """Get ping interval from env (default 15s). Set to 0 to disable."""
@@ -353,7 +375,7 @@ class WsStream:
         WS_KEEPALIVE_INTERVAL env var). Set to 0 to disable.
         """
         if self._log:
-            self._log.info("WebSocket keepalive started for %s (interval=%.1fs)", self._host, self._keepalive_interval)
+            self._log.debug("WebSocket keepalive started for %s (interval=%.1fs)", self._host, self._keepalive_interval)
         try:
             while not self._eof and self._tr_writer is not None and not self._tr_writer.is_closing():
                 await asyncio.sleep(self._keepalive_interval)
@@ -369,7 +391,7 @@ class WsStream:
                         self._log.debug("WebSocket ping sent to %s", self._host)
                 except Exception as exc:
                     if self._log:
-                        self._log.warning("WebSocket ping failed: %s", exc)
+                        self._log.debug("WebSocket ping failed: %s", exc)
                     # Connection likely dead; readexactly will surface the error
                     break
         except asyncio.CancelledError:
@@ -381,7 +403,7 @@ class WsStream:
             pass
         finally:
             if self._log:
-                self._log.info("WebSocket keepalive stopped for %s", self._host)
+                self._log.debug("WebSocket keepalive stopped for %s", self._host)
 
 
 class _ConnectionWsBase(ObfuscatedConnection):
@@ -448,11 +470,14 @@ def make_ws_connection_class(conn: ConnectionSettings) -> type:
     attribute (Telethon instantiates connection classes itself with
     (ip, port, dc_id, loggers, proxy, local_addr) — there is no kwarg
     channel for extra settings — and the classes stay cheap).
+
+    v3.2.10: Normalizes worker domain to handle trailing slashes and http:// prefixes.
     """
     if conn.cf_worker_domain:
+        normalized = _normalize_worker_domain(conn.cf_worker_domain)
         return type(
             "ConnectionWsViaWorker",
             (ConnectionWsViaWorker,),
-            {"WORKER_DOMAIN": conn.cf_worker_domain},
+            {"WORKER_DOMAIN": normalized},
         )
     return ConnectionWsDirect

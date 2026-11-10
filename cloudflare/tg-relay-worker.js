@@ -1,5 +1,5 @@
 /**
- * Telegram WebSocket Relay Worker — userbot_own v3.2.9 "cf" mode
+ * Telegram WebSocket Relay Worker — userbot_own v3.2.10 "cf" mode
  * ============================================================
  *
  * Purpose
@@ -49,6 +49,9 @@ const ALLOWED_HOST_PORT = /^([a-z]+)(-1)?\.web\.telegram\.org:(\d+)$/;
 // Keepalive interval for upstream connection (seconds)
 const UPSTREAM_PING_INTERVAL = 15;
 
+// Maximum message size (32 MiB - Cloudflare Workers limit)
+const MAX_MESSAGE_SIZE = 32 * 1024 * 1024;
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -85,10 +88,13 @@ export default {
     // Outbound: dial Telegram's WebSocket endpoint from CF's edge.
     // In Workers, fetch() with an Upgrade:websocket header returns a
     // 101 response whose `webSocket` property is the server-side socket.
+    // Pass CF-Connecting-IP header for fixed IP identification.
     const upstream = new Request(`https://${destHost}:${destPort}/apiws`, {
       headers: {
         "Upgrade": "websocket",
         "Sec-WebSocket-Protocol": "binary",
+        "CF-Connecting-IP": request.headers.get("CF-Connecting-IP") || "",
+        "X-Forwarded-For": request.headers.get("X-Forwarded-For") || "",
       },
     });
     let resp;
@@ -101,6 +107,9 @@ export default {
       return new Response("upstream not websocket: " + resp.status, { status: 502 });
     }
     const tg = resp.webSocket;
+
+    // Enforce binary type for the upstream WebSocket to avoid TEXT frame issues
+    tg.binaryType = "arraybuffer";
 
     // Inbound: create the pair CF hands to the client.
     // WebSocketPair() returns an ordinary object {0: client, 1: server};
@@ -145,8 +154,13 @@ export default {
     // Pump bytes both directions, transparently. WebSocket messages
     // here are one duplex byte stream — MTProto's own transport
     // framing manages chunking; we relay frames as-is.
+    // Validate message size to respect Cloudflare Workers 32 MiB limit.
     server.addEventListener("message", (ev) => {
       toBuf(ev.data).then((b) => {
+        if (b.byteLength > MAX_MESSAGE_SIZE) {
+          try { server.close(1009, "Message too large"); } catch (e) {}
+          return;
+        }
         try { tg.send(b); } catch (e) {}
       });
     });
@@ -165,6 +179,10 @@ export default {
 
     tg.addEventListener("message", (ev) => {
       toBuf(ev.data).then((b) => {
+        if (b.byteLength > MAX_MESSAGE_SIZE) {
+          try { tg.close(1009, "Message too large"); } catch (e) {}
+          return;
+        }
         try { server.send(b); } catch (e) {}
       });
     });
