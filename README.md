@@ -4,7 +4,7 @@ The fastest way to get running — no manual `venv` setup, no remembering
 paths. Works on **Android (Termux)** and **Debian/Ubuntu-based Linux**.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/pppppuhdtxd/userbot_own/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/parhamghahremani/userbot_own/main/install.sh | bash
 ```
 
 This single command will:
@@ -78,7 +78,7 @@ Termux/Debian/Ubuntu), see the [Quick Start](#quick-start) section below.
 A professional, async, hot-reload-capable Telegram account management system
 built with Python 3.11+ and [Telethon](https://docs.telethon.dev/).
 
-**Current version:** `3.2.11`
+**Current version:** `3.2.12`
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

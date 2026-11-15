@@ -5,6 +5,52 @@ Format follows [Semantic Versioning](https://semver.org): **MAJOR.MINOR.PATCH**
 
 ---
 
+## [3.2.12] — 2026-11-13
+
+**Source:** AI + project owner — Critical launcher fixes, log noise reduction, Windows reinstall fix, Connection Settings menu unification (4-option), dead code removal, BACKOFF_* cleanup.
+
+### Fixed
+
+- **`install.sh` Termux/Linux launcher** (generated `~/.local/bin/userbot`):
+  - **Option 4 (Update):** Now performs `git fetch` + `git reset --hard origin/<branch>` + `pip install -r requirements.txt` instead of `exit 0`. Preserves `accounts/`, `.env`, `data/` folders.
+  - **Option 5 (Quit):** Now breaks the menu loop cleanly instead of falling through to "Invalid option".
+  - Connection Settings submenu kept at 4 options (Show / Change mode / Test / Back) matching `run.bat` exactly.
+  - Main menu retains 5 options (Run / Accounts / Connection Settings / Update / Quit) — Update is Termux-only as designed.
+
+- **`run.bat` Windows launcher**:
+  - **Reinstall:** Replaced `curl | bash` (non-functional on native Windows) with `powershell -NoProfile -ExecutionPolicy Bypass -Command "irm ... | iex"`.
+  - **Dead code removed:** Unused `:after_run` label (lines 254-258) and duplicated help text block (lines 218-250 mirroring 188-223).
+  - Help text deduplicated; Connection Settings documented once.
+
+- **`core/logging_setup.py`**:
+  - **WebSocket connection logs demoted to DEBUG:** `_TERMINAL_DEMOTE_PATTERNS` matching now case-insensitive. Added "disconnected from wss://" variant. Patterns: "connecting to wss://", "connection to wss://", "disconnecting from wss://", "disconnected from wss://", " complete!", plus difference-fetch logs. Result: no periodic INFO spam while connected via Cloudflare Worker; only DEBUG heartbeats visible in log files.
+
+- **`userbot_own/config/models.py` & `config/loader.py`**:
+  - **Removed `BACKOFF_START` / `BACKOFF_MAX`**: These were loaded from environment but never consumed by `core/reconnector.py` (its backoff formulas are hardcoded). Removed from `Settings` dataclass and `load_settings()`. Fast-reconnect settings (`FAST_RECONNECT_*`) remain documented in `Settings` for discoverability but are still read directly by `core/reconnector.py` from environment.
+
+### Changed
+
+- **Connection Settings menu unified to 4 options** across both launchers:
+  1. Show current settings
+  2. Change connection mode (submenu: Direct / SOCKS5 / CF without Worker / CF with Worker / Back)
+  3. Test connection
+  4. Back to main menu
+  This matches the 4-option design in `run.bat`; the Termux launcher's Connection Settings submenu was already identical.
+
+### Files changed
+
+- `install.sh` — Update option implemented, Quit fixed, Connection Settings parity
+- `run.bat` — Reinstall uses PowerShell, dead code removed, help deduplicated
+- `userbot_own/core/logging_setup.py` — Case-insensitive demote patterns, added "disconnected" variant
+- `userbot_own/config/models.py` — Removed backoff_start/backoff_max fields
+- `userbot_own/config/loader.py` — Removed backoff_start/backoff_max from load_settings()
+- `VERSION` → `3.2.12`
+- `pyproject.toml` → `3.2.12`
+- `userbot_own/__init__.py` — `_FALLBACK_VERSION` 3.2.12
+- `README.md` — Current version line
+
+---
+
 ## [3.2.11] — 2026-11-10
 
 **Source:** AI + project owner — Termux launcher fixes, menu parity with run.bat, three `exec` removals for proper menu return.

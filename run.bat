@@ -177,7 +177,7 @@ goto :settings
 echo.
 echo  ── Full reinstall ... ──
 echo.
-curl -fsSL https://raw.githubusercontent.com/pppppuhdtxd/userbot_own/main/install.sh | bash
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/parhamghahremani/userbot_own/main/install.sh | iex"
 goto :menu
 
 :version
@@ -222,38 +222,6 @@ echo    * Ctrl+C during a running task returns to the launching menu
 echo    * Connection mode is system-wide (applies to bot + account manager)
 echo    * Data preserved on update: accounts/, .env/, data/ folders
 echo.
-echo  Account management (interactive):
-echo    1) Add new account (full login or import string session)
-echo    2) Re-login / recreate session
-echo    3) Edit account details (api_id, api_hash, phone, label)
-echo    4) Remove account
-echo    5) List accounts
-echo    6) Verify session
-echo.
-echo  Connection settings (interactive):
-echo    1) Show current settings
-echo    2) Change connection mode
-echo       1) Direct connection
-echo       2) SOCKS5 proxy (prompts for host/port/user/pass)
-echo       3) Cloudflare - without Worker (official endpoints)
-echo       4) Cloudflare - with Worker (prompts for Worker domain)
-echo       5) Back to Connection Settings
-echo    3) Test connection
-echo    4) Back to main menu
-echo.
-echo  Notes:
-echo    * All menus use single keypress (no Enter needed) in a TTY
-echo    * Invalid input in menus clears and re-prompts automatically
-echo    * Ctrl+C during a running task returns to the launching menu
-echo    * Connection mode is system-wide (applies to bot + account manager)
-echo    * Data preserved on update: accounts/, .env/, data/ folders
-echo.
-pause
-goto :menu
-
-:after_run
-echo.
-echo  Task finished.
 pause
 goto :menu
 
