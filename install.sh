@@ -536,7 +536,7 @@ main_menu() {
       5) break ;;
       *) warn "Invalid option. Choose 1-5." ;;
     esac
-  end
+  done
 }
 
 case "${1:-}" in
