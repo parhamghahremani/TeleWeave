@@ -31,9 +31,13 @@ jobs:
           test ! -d "userbot_own" && echo "✓ userbot_own/ directory does not exist"
           test ! -d "userbot" && echo "✓ userbot/ lowercase directory does not exist"
 
-      - name: Install package in isolated environment
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
+          pip install -r requirements.txt
+
+      - name: Install package in isolated environment
+        run: |
           pip install -e . --no-deps
 
       - name: Verify imports and version
