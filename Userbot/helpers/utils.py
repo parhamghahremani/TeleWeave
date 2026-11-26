@@ -1,0 +1,1254 @@
+"""
+Userbot/helpers/utils.py
+================
+Shared utility functions used across all userbot modules.
+
+Contents
+--------
+- Message-delete helpers (``safe_delete``, ``batch_delete``)
+- Media-type predicate functions (``is_photo``, ``is_video``, …)
+- Link detection (``is_link`` — includes WebPage, URL entities, inline
+  keyboard buttons with URLs, and raw URL patterns in text)
+- Message classification (``classify_message``)
+- File-info helpers (``get_file_extension``, ``get_file_size``)
+- Flood-error helpers (``flood_seconds``, ``FLOOD_ERRORS``) — v3.2.2 (B-01)
+
+Message Classification System (v1.6.1+)
+----------------------------------------
+Messages are classified into ONE of these types based on priority:
+    file > vid > pic > link > txt > other
+
+The `link` type detection is comprehensive and covers:
+    • MessageMediaWebPage (auto-generated preview for download links, etc.)
+    • MessageEntityUrl / MessageEntityTextUrl (inline URL entities)
+    • PLAIN URL buttons in ReplyInlineMarkup (دکمه شیشه‌ای — KeyboardButtonUrl on
+      Telethon <= 1.44, KeyboardInlineButton + InlineButtonTypeUrl on >= 1.45,
+      detected via is_url_button()). Login (URL-auth) and Web-App buttons are
+      deliberately NOT links — see get_inline_button_url().
+    • Raw URL patterns in text (fallback when entities aren't parsed)
+
+This ensures each message has exactly one type, avoiding ambiguity
+in filtering operations (clear, auto_clearer, etc.).
+
+This module is deliberately plain functions, not a class — there is no
+per-account or cross-cutting state here to justify constructor injection;
+it's a pure(-ish) utility library, same as the original.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import math
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from telethon import errors
+from telethon.tl.functions.channels import GetChannelsRequest
+from telethon.tl.functions.messages import GetChatsRequest
+from telethon.tl.functions.users import GetUsersRequest
+from telethon.tl.types import (
+    DocumentAttributeAudio,
+    DocumentAttributeFilename,
+    DocumentAttributeSticker,
+    DocumentAttributeVideo,
+    InputChannel,
+    InputUser,
+    MessageEntityTextUrl,
+    MessageEntityUrl,
+    MessageMediaDocument,
+    MessageMediaPhoto,
+    MessageMediaWebPage,
+    ReplyInlineMarkup,
+    UserStatusOffline,
+    UserStatusOnline,
+    UserStatusRecently,
+)
+from telethon.tl.types import messages as tl_msg_types
+
+from Userbot.core.logging_setup import get_logger
+
+# ── Inline-keyboard URL-button compatibility (Telethon <1.45 vs >=1.45) ──
+#
+# Telethon 1.45.0 (TL layer 229) removed ``KeyboardButtonUrl`` entirely:
+#   old (<=1.44):  KeyboardButtonUrl(text=..., url=...)
+#   new (>=1.45):  KeyboardInlineButton(text=..., type=InlineButtonTypeUrl(url=...))
+#
+# Importing the old name unconditionally is what crashed startup with
+# ``ImportError: cannot import name 'KeyboardButtonUrl'`` on 1.45.x.
+# Both imports below are optional; the helpers underneath match EXACT button
+# types (v3.2.0 — they used to duck-type on any ``.url`` attribute, which also
+# matched login and Web-App buttons) so the code works on either Telethon version.
+try:  # Telethon <= 1.44
+    from telethon.tl.types import KeyboardButtonUrl as _KeyboardButtonUrl
+except ImportError:  # Telethon >= 1.45 — removed
+    _KeyboardButtonUrl = None  # type: ignore[assignment]
+try:  # Telethon >= 1.45 (TL layer 229)
+    from telethon.tl.types import InlineButtonTypeUrl as _InlineButtonTypeUrl
+    from telethon.tl.types import KeyboardInlineButton as _KeyboardInlineButton
+except ImportError:  # Telethon <= 1.44 — does not exist yet
+    _InlineButtonTypeUrl = None  # type: ignore[assignment]
+    _KeyboardInlineButton = None  # type: ignore[assignment]
+
+#: Re-exported aliases kept so external code doing
+#: ``from Userbot.helpers.utils import KeyboardButtonUrl`` keeps working.
+#: They are ``None`` on Telethon versions where the TL constructor is absent.
+KeyboardButtonUrl = _KeyboardButtonUrl
+KeyboardInlineButton = _KeyboardInlineButton
+InlineButtonTypeUrl = _InlineButtonTypeUrl
+
+if TYPE_CHECKING:
+    pass
+
+log = get_logger(__name__)
+
+
+__all__ = [
+    # Delete helpers
+    "safe_delete",
+    "batch_delete",
+    "leave_dialog",
+    # Media predicates
+    "is_photo",
+    "is_video",
+    "is_sticker",
+    "is_audio",
+    "is_file",
+    # Link detection
+    "is_link",
+    "get_inline_button_url",
+    "is_url_button",
+    # Message classification
+    "classify_message",
+    "MESSAGE_TYPES",
+    "MEDIA_TYPES",
+    "FILTER_TYPES",
+    # File info
+    "get_file_extension",
+    "get_file_size",
+    # JSON settings persistence
+    "read_json_file",
+    "write_json_file_atomic",
+    # Entity/user formatting (v3.0.10)
+    "format_user_flags",
+    "format_user_status",
+    "truncate",
+    "get_profile_photos_safe",
+    # Numeric-ID entity resolution (v3.1.5)
+    "resolve_entity_by_id",
+    "EntityResolutionError",
+    # Flood-error helpers (v3.2.2 — B-01)
+    "flood_seconds",
+    "FLOOD_ERRORS",
+]
+
+
+# ── Shared regex for URL detection ───────────────────────────────────────────
+_URL_RE = re.compile(r"https?://[^\s<>\"{}|\\^`\[\]]+", re.IGNORECASE)
+
+
+# ── Flood-error helpers (v3.2.2 — B-01) ──────────────────────────────────────
+#
+# Telethon's flood family is a set of SIBLINGS under errors.FloodError, not a
+# chain: FloodWaitError, FloodPremiumWaitError, FloodTestPhoneWaitError and
+# SlowModeWaitError all derive from FloodError directly, and none is a
+# subclass of another. `except errors.FloodWaitError` therefore silently
+# misses the other three.
+#
+# join_left.py gained the correct `except errors.FloodError` treatment in
+# v3.2.0, but the other 20 catch sites in the project were never migrated —
+# including helpers/utils.py's own delete path, which every clearing module
+# goes through. The reproduction: a bulk delete whose server response raised
+# FloodPremiumWaitError fell through `except errors.FloodWaitError` into the
+# generic `except Exception`, which triggered the one-by-one fallback, which
+# re-raised the SAME flood error once per message (100 extra API calls under
+# flood conditions) and finally reported "0 deleted" — while the identical
+# error raised as a plain FloodWaitError was correctly slept through.
+#
+# These two helpers are the shared, project-wide replacement for that
+# pattern: catch FLOOD_ERRORS (or errors.FloodError) and read the wait
+# through flood_seconds().
+
+#: Every Telethon exception that carries a flood wait. Prefer catching this
+#: tuple (or ``errors.FloodError``) over ``errors.FloodWaitError`` alone.
+FLOOD_ERRORS: tuple[type[Exception], ...] = (
+    errors.FloodWaitError,
+    errors.FloodPremiumWaitError,
+    errors.FloodTestPhoneWaitError,
+    errors.SlowModeWaitError,
+)
+
+
+def flood_seconds(exc: BaseException) -> int:
+    """
+    Seconds Telegram asks us to wait, for ANY member of Telethon's flood family.
+
+    ``errors.FloodWaitError``, ``FloodPremiumWaitError``,
+    ``FloodTestPhoneWaitError`` and ``SlowModeWaitError`` are SIBLINGS under
+    ``errors.FloodError`` — none subclasses another — so catching only
+    ``errors.FloodWaitError`` silently misses the other three. Read the wait
+    through this helper instead of touching ``exc.seconds`` directly: the
+    bare ``FloodError`` base class carries no ``.seconds`` attribute, hence
+    the defensive ``getattr``. Always returns at least 1.
+
+    v3.2.2 (B-01): promoted from ``modules/packages/join_left/``'s private
+    ``_flood_seconds()`` so every module shares one implementation. The
+    behaviour is byte-for-byte the same as the original helper.
+
+    Args:
+        exc: The caught exception (any flood sibling, or a plain FloodError).
+
+    Returns:
+        The wait in seconds, never less than 1.
+
+    Example:
+        >>> try:
+        ...     await client(SomeRequest())
+        ... except errors.FloodError as exc:
+        ...     await asyncio.sleep(flood_seconds(exc))
+    """
+    try:
+        seconds = int(getattr(exc, "seconds", 0) or 0)
+    except (TypeError, ValueError):
+        seconds = 0
+    return max(1, seconds)
+
+
+# ── Delete helpers ────────────────────────────────────────────────────────────
+
+async def safe_delete(
+    client,
+    entity,
+    message_ids: int | list[int],
+) -> bool:
+    """
+    Delete one or more messages, silently absorbing permission errors.
+
+    Args:
+        client:      Active ``TelegramClient``.
+        entity:      Chat or peer to delete from.
+        message_ids: Single message ID or list of IDs.
+
+    Returns:
+        ``True`` if the delete API call succeeded, ``False`` otherwise.
+
+    Example:
+        >>> await safe_delete(client, chat_id, 12345)
+        True
+    """
+    ids = message_ids if isinstance(message_ids, list) else [message_ids]
+    try:
+        await client.delete_messages(entity, ids, revoke=True)
+        return True
+    except FLOOD_ERRORS as exc:
+        # v3.2.2 (B-01): catches ALL flood siblings, not just FloodWaitError.
+        # A FloodPremiumWaitError / FloodTestPhoneWaitError / SlowModeWaitError
+        # used to fall into the generic `except Exception` below and be
+        # reported as an "unexpected error" — hiding the rate limit behind
+        # a wrong diagnosis.
+        log.warning("safe_delete: FloodWait %ds.", flood_seconds(exc))
+        return False
+    except (
+        errors.MessageDeleteForbiddenError,
+        errors.ChatAdminRequiredError,
+        errors.UserAdminInvalidError,
+        errors.ChatWriteForbiddenError,
+        errors.RPCError,
+    ) as exc:
+        log.debug("safe_delete: permission denied — %s", exc)
+        return False
+    except Exception as exc:
+        log.error("safe_delete: unexpected error — %s", exc)
+        return False
+
+
+def _pts_count(results) -> int:
+    """
+    Sum the ``pts_count`` fields from a list of ``messages.AffectedMessages``
+    returned by ``client.delete_messages()``.
+
+    ``pts_count`` is the number of messages Telegram actually deleted
+    server-side. This may be less than the number of IDs submitted when the
+    caller does not have permission to delete some (e.g. other members'
+    messages in a group without admin rights). Summing it gives an exact
+    deletion count rather than relying on ``len(batch)`` as a proxy.
+
+    Args:
+        results: Return value of ``client.delete_messages()`` — a list of
+                 ``messages.AffectedMessages`` objects (one per internal
+                 100-message chunk).
+
+    Returns:
+        Total number of messages deleted according to Telegram.
+    """
+    if not results:
+        return 0
+    total = 0
+    for r in results:
+        if isinstance(r, tl_msg_types.AffectedMessages):
+            total += r.pts_count
+        else:
+            log.debug("batch_delete: unexpected result type %s", type(r).__name__)
+    return total
+
+
+async def batch_delete(
+    client,
+    entity,
+    ids: list[int],
+    batch_size: int = 100,
+) -> int:
+    """
+    Delete a list of message IDs in batches of *batch_size*.
+
+    Uses ``messages.AffectedMessages.pts_count`` returned by
+    ``client.delete_messages()`` for an accurate deletion count.
+    Telegram's ``pts_count`` reflects the number of messages actually
+    removed server-side, which may be less than ``len(batch)`` when some
+    IDs belong to other users in a group where the caller lacks admin
+    delete rights.
+
+    Falls back to one-by-one deletion via ``safe_delete()`` if a batch
+    raises a non-FloodWait exception.
+
+    Args:
+        client:     Active ``TelegramClient``.
+        entity:     Chat or peer to delete from.
+        ids:        List of message IDs to delete.
+        batch_size: Max IDs per API call (Telegram limit is 100).
+
+    Returns:
+        Number of messages actually deleted according to Telegram's
+        ``pts_count`` response field.
+
+    Example:
+        >>> deleted = await batch_delete(client, chat_id, [1, 2, 3, 4, 5])
+        >>> print(f"Deleted {deleted} messages")
+        Deleted 5 messages
+    """
+    deleted = 0
+    _MAX_BATCH_FW_RETRIES = 5
+    for i in range(0, len(ids), batch_size):
+        batch = ids[i : i + batch_size]
+
+        # v3.0.9: small proactive pacing between batches (mirrors the
+        # wait_time mitigation already used on iter_messages scans) so a
+        # large clear doesn't fire many delete_messages calls back-to-back
+        # — the burst pattern most likely to trigger FloodWait in the
+        # first place, rather than just reacting to it after the fact.
+        if i > 0:
+            await asyncio.sleep(0.5)
+
+        attempt = 0
+        while True:
+            try:
+                results = await client.delete_messages(entity, batch, revoke=True)
+                deleted += _pts_count(results)
+                break
+            except FLOOD_ERRORS as exc:
+                # v3.2.2 (B-01): ALL flood siblings. Previously only
+                # errors.FloodWaitError was caught, so a
+                # FloodPremiumWaitError (or SlowModeWaitError / ...)
+                # fell through to the generic `except Exception` below,
+                # which triggered the one-by-one fallback — that re-issued
+                # the SAME flood error once per message (up to 100 extra
+                # API calls, each one more likely to be flood-limited) and
+                # finally reported 0 deleted. With the whole family caught
+                # here, the batch is slept through and retried exactly like
+                # a plain FloodWaitError.
+                attempt += 1
+                if attempt > _MAX_BATCH_FW_RETRIES:
+                    # v3.0.9: previously gave up silently after exactly one
+                    # retry regardless of the new wait time — a second
+                    # consecutive FloodWait on the same batch would drop
+                    # its deletions with no further attempt. Now retries
+                    # up to a cap, honoring each new wait.
+                    log.error(
+                        "batch_delete: FloodWait retry cap (%d) exceeded — "
+                        "skipping remaining batch.", _MAX_BATCH_FW_RETRIES,
+                    )
+                    break
+                wait = flood_seconds(exc)
+                log.warning(
+                    "batch_delete: FloodWait %ds (attempt %d/%d) — waiting…",
+                    wait, attempt, _MAX_BATCH_FW_RETRIES,
+                )
+                await asyncio.sleep(wait)
+            except Exception as exc:
+                log.error("batch_delete: batch failed (%s) — one-by-one fallback.", exc)
+                for mid in batch:
+                    if await safe_delete(client, entity, mid):
+                        deleted += 1
+                break
+    return deleted
+
+
+async def leave_dialog(client, entity) -> None:
+    """
+    Remove the account from *entity*, correctly, regardless of its type.
+
+    v3.0.11: replaces three independent call sites in join_left.py
+    (`_leave_and_reset_joined_folder`, `_check_auto_leave`,
+    `_handle_left`) that each used ``DeleteHistoryRequest`` for legacy
+    basic-group (``Chat``) entities. ``DeleteHistoryRequest`` only
+    clears the *local* message view — it does not remove chat
+    membership, so the account silently remained a member of every
+    basic group it was reported to have "left" (see CHANGELOG v3.0.11
+    and the audit report for the full analysis).
+
+    This delegates entirely to Telethon's own high-level
+    ``TelegramClient.delete_dialog()``, which already implements the
+    correct behavior per entity type, rather than re-implementing raw
+    TL request selection a fourth time:
+        - Channel (including supergroups): leaves via LeaveChannelRequest.
+        - Chat (legacy basic group): removes the account as a
+          participant via DeleteChatUserRequest.
+        - User (private chat / bot conversation): there is no
+          membership to leave, so this deletes the local dialog/history
+          — the only meaningful "leave" action for a 1:1 conversation.
+
+    Args:
+        client: Active ``TelegramClient``.
+        entity: Resolved Channel, Chat, or User entity to leave/delete.
+    """
+    await client.delete_dialog(entity)
+
+
+# ── Media type predicates ─────────────────────────────────────────────────────
+#
+# Performance-critical: these are called thousands of times per clear/forward
+# operation. Using isinstance() is ~100x faster than try/except or getattr().
+
+def is_photo(media) -> bool:
+    """
+    Return ``True`` if *media* is a photo or a photo-like document.
+
+    Checks:
+    - Native ``MessageMediaPhoto`` (standard Telegram photos)
+    - Documents with image file extensions (.jpg, .jpeg, .png, .bmp, .webp)
+      that are NOT videos or stickers
+
+    Performance:
+        O(1) for native photos, O(n) for documents where n = attribute count.
+
+    Example:
+        >>> is_photo(msg.media)
+        True
+    """
+    if isinstance(media, MessageMediaPhoto):
+        return True
+    if isinstance(media, MessageMediaDocument) and media.document:
+        # Quick reject: videos and stickers are never photos
+        for attr in media.document.attributes:
+            if isinstance(attr, (DocumentAttributeVideo, DocumentAttributeSticker)):
+                return False
+        # Check filename extension for image-like documents
+        for attr in media.document.attributes:
+            if isinstance(attr, DocumentAttributeFilename):
+                return attr.file_name.lower().endswith(
+                    (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+                )
+    return False
+
+
+def is_video(media) -> bool:
+    """
+    Return ``True`` if *media* contains a video document.
+
+    Performance:
+        O(1) for non-documents, O(n) for documents.
+
+    Example:
+        >>> is_video(msg.media)
+        True
+    """
+    if not isinstance(media, MessageMediaDocument) or not media.document:
+        return False
+    return any(isinstance(a, DocumentAttributeVideo) for a in media.document.attributes)
+
+
+def is_sticker(media) -> bool:
+    """
+    Return ``True`` if *media* is a sticker.
+
+    Performance:
+        O(1) for non-documents, O(n) for documents.
+    """
+    if not isinstance(media, MessageMediaDocument) or not media.document:
+        return False
+    return any(isinstance(a, DocumentAttributeSticker) for a in media.document.attributes)
+
+
+def is_audio(media) -> bool:
+    """
+    Return ``True`` if *media* is an audio file or voice message.
+
+    Performance:
+        O(1) for non-documents, O(n) for documents.
+    """
+    if not isinstance(media, MessageMediaDocument) or not media.document:
+        return False
+    return any(isinstance(a, DocumentAttributeAudio) for a in media.document.attributes)
+
+
+def is_file(media) -> bool:
+    """
+    Return ``True`` if *media* is a generic file (not photo/video/sticker/audio).
+
+    This represents the highest-priority type in the classification system.
+    Documents with ``DocumentAttributeFilename`` but no video/audio/sticker
+    attributes are classified as files.
+
+    Performance:
+        O(n) where n = attribute count.
+
+    Example:
+        >>> is_file(msg.media)  # PDF, ZIP, etc.
+        True
+    """
+    if not media:
+        return False
+    if is_photo(media) or is_video(media) or is_sticker(media) or is_audio(media):
+        return False
+    if isinstance(media, MessageMediaDocument) and media.document:
+        return any(
+            isinstance(a, DocumentAttributeFilename)
+            for a in media.document.attributes
+        )
+    return False
+
+
+# ── Link detection ────────────────────────────────────────────────────────────
+
+def _non_empty_str(value) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def get_inline_button_url(button) -> str | None:
+    """Return the URL of a PLAIN URL button of an inline keyboard, or ``None``.
+
+    v3.2.0 (N13): EXACT types only. The earlier duck-typed version returned
+    ``.url`` from any button that had one, so on both Telethon generations a
+    URL-auth ("Login with Telegram"), Web-App or simple-Web-App button counted as a
+    "link" — which made ``clear link`` / auto-clear delete messages that merely
+    carried a login or app button, and made ``join`` harvest those buttons' URLs.
+    Those buttons are not shared links and are no longer matched:
+
+    - Telethon <= 1.44: only ``KeyboardButtonUrl``. (KeyboardButtonUrlAuth,
+      KeyboardButtonWebView and KeyboardButtonSimpleWebView are SIBLING classes
+      — verified: none subclasses KeyboardButtonUrl — so ``isinstance`` is exact.)
+    - Telethon >= 1.45: only ``KeyboardInlineButton`` whose ``.type`` is exactly
+      ``InlineButtonTypeUrl`` (InlineButtonTypeUrlAuth / InlineButtonTypeWebView
+      are siblings of it).
+
+    Objects that are not instances of the real classes (vendored copies, test
+    doubles) are matched by their EXACT class name — never by "has a ``.url``".
+    Every other button kind (callback, switch_inline, url_auth, web_view, …)
+    returns ``None``.
+    """
+    if button is None:
+        return None
+
+    # Telethon <= 1.44
+    if _KeyboardButtonUrl is not None and isinstance(button, _KeyboardButtonUrl):
+        return _non_empty_str(getattr(button, "url", None))
+
+    # Telethon >= 1.45
+    if _KeyboardInlineButton is not None and isinstance(button, _KeyboardInlineButton):
+        btn_type = getattr(button, "type", None)
+        if _InlineButtonTypeUrl is not None and isinstance(btn_type, _InlineButtonTypeUrl):
+            return _non_empty_str(getattr(btn_type, "url", None))
+        return None
+
+    # Exact class-name fallback (vendored copies / fakes) — NOT duck typing on ``.url``.
+    name = type(button).__name__
+    if name == "KeyboardButtonUrl":
+        return _non_empty_str(getattr(button, "url", None))
+    if name == "KeyboardInlineButton":
+        btn_type = getattr(button, "type", None)
+        if type(btn_type).__name__ == "InlineButtonTypeUrl":
+            return _non_empty_str(getattr(btn_type, "url", None))
+    return None
+
+
+def is_url_button(button) -> bool:
+    """Return ``True`` if *button* is a plain inline-keyboard URL button (not login / Web-App)."""
+    return get_inline_button_url(button) is not None
+
+
+def is_link(msg) -> bool:
+    """
+    Return ``True`` if *msg* contains a link in any form.
+
+    A message is considered a "link" if ANY of the following is true:
+    1. It has ``MessageMediaWebPage`` (auto-generated preview for downloadable
+       links, t.me links, bot deep links, etc.)
+    2. It contains ``MessageEntityUrl`` or ``MessageEntityTextUrl`` in its
+       entities (clickable URL hyperlinks in text)
+    3. Its inline keyboard (``reply_markup``) contains at least one
+       plain URL button (دکمه شیشه‌ای) — ``KeyboardButtonUrl`` on Telethon
+       <= 1.44, ``KeyboardInlineButton`` + ``InlineButtonTypeUrl`` on
+       Telethon >= 1.45 (detected via ``is_url_button()``). Login (URL-auth)
+       and Web-App buttons do NOT count.
+    4. Its text matches a raw URL pattern (fallback for cases where Telegram
+       didn't parse the URL as an entity)
+
+    This type sits between media types (file/vid/pic) and plain text in the
+    priority hierarchy: ``file > vid > pic > link > txt``
+
+    Args:
+        msg: A Telethon Message object (not just media).
+
+    Returns:
+        ``True`` if the message contains link-related content.
+
+    Example:
+        >>> is_link(msg_with_webpage)          # Download URL → True
+        True
+        >>> is_link(msg_with_inline_url_btn)   # دکمه شیشه‌ای → True
+        True
+        >>> is_link(plain_text_msg)
+        False
+    """
+    if not msg:
+        return False
+
+    # 1. Check for WebPage preview (auto-generated for download links, etc.)
+    media = getattr(msg, "media", None)
+    if isinstance(media, MessageMediaWebPage):
+        return True
+
+    # 2. Check for URL entities in the message text
+    entities = getattr(msg, "entities", None) or []
+    for entity in entities:
+        if isinstance(entity, (MessageEntityUrl, MessageEntityTextUrl)):
+            return True
+
+    # 3. Check for URL buttons in inline keyboard (دکمه شیشه‌ای)
+    #    This covers bot messages with buttons like "🔗 Visit Website".
+    #    Compatible with both Telethon generations (see is_url_button()).
+    reply_markup = getattr(msg, "reply_markup", None)
+    if isinstance(reply_markup, ReplyInlineMarkup):
+        rows = getattr(reply_markup, "rows", None) or []
+        for row in rows:
+            buttons = getattr(row, "buttons", None) or []
+            for button in buttons:
+                if is_url_button(button):
+                    return True
+
+    # 4. Fallback: check for raw URL pattern in text
+    #    Handles cases where Telegram didn't parse the URL as an entity
+    #    (e.g., some bot messages, or URLs inside code blocks)
+    text = getattr(msg, "text", None) or getattr(msg, "message", None)
+    if text and _URL_RE.search(text):
+        return True
+
+    return False
+
+
+# ── Message classification ────────────────────────────────────────────────────
+
+#: The single canonical list of message types ``classify_message()`` can
+#: return, in classification-priority order.
+#:
+#: v3.2.2 (B-14): this list was previously duplicated in FIVE places —
+#: ``auto_clearer.py``'s ``_TYPES`` / ``_SINGLE_TYPES`` / ``type_order``,
+#: ``clearer.py``'s ``TYPE_FILTERS["all"]`` / breakdown loop, and
+#: ``info_handler.py``'s ``_TYPE_LABELS`` — each a hand-maintained copy that
+#: had to be updated separately whenever a type was added to
+#: ``classify_message()``. A new type would silently be missing from
+#: ``clear all`` and from the auto-clear type list. Every module now derives
+#: its list from this one.
+MESSAGE_TYPES: tuple[str, ...] = ("file", "vid", "pic", "link", "txt", "other")
+
+#: The subset of :data:`MESSAGE_TYPES` that counts as "real media" — the
+#: ``media`` composite filter. ``link`` is deliberately NOT included: a
+#: WebPage preview is metadata, not an attachment.
+MEDIA_TYPES: frozenset[str] = frozenset({"pic", "vid", "file"})
+
+#: The types a user can select as a filter target: every real type plus the
+#: ``media`` composite.
+FILTER_TYPES: frozenset[str] = frozenset(MESSAGE_TYPES) | {"media"}
+
+
+def classify_message(msg) -> str:
+    """
+    Classify a message into exactly ONE type based on priority.
+
+    Priority order (highest to lowest):
+        1. ``file``   — Document with filename, no video/audio/sticker attributes
+        2. ``vid``    — Document with video attribute
+        3. ``pic``    — Photo or photo-like document
+        4. ``link``   — WebPage preview, URL entity, inline keyboard URL button,
+                        or raw URL in text
+        5. ``txt``    — Plain text message (no media, no links)
+        6. ``other``  — Stickers, voice messages, contacts, locations, etc.
+
+    Caveat (v3.1.10, checked with real Telethon Message objects): ``link`` and
+    ``txt`` look at the message's text/caption, not at whether media is
+    attached. ``file``, ``vid`` and ``pic`` are decided first, so a file,
+    video or photo WITH a caption keeps its media class. Audio and voice
+    messages have no tier of their own, though, so one that carries a caption
+    lands in ``txt`` (or ``link``, if the caption contains a URL) instead of
+    ``other`` — only a caption-less one reaches ``other``. The modules' help
+    texts say "audio/voice → other"; that holds for the usual caption-less
+    case.
+
+    This ensures each message has exactly one classification, avoiding
+    ambiguity in filtering operations.
+
+    Args:
+        msg: A Telethon Message object.
+
+    Returns:
+        One of: ``"file"``, ``"vid"``, ``"pic"``, ``"link"``, ``"txt"``, ``"other"``
+
+    Example:
+        >>> classify_message(msg_with_video)
+        'vid'
+        >>> classify_message(msg_with_link)
+        'link'
+        >>> classify_message(msg_with_inline_url_button)
+        'link'
+        >>> classify_message(plain_text_msg)
+        'txt'
+    """
+    if not msg:
+        return "other"
+
+    media = getattr(msg, "media", None)
+
+    # Priority 1: File (document without video/audio/sticker)
+    if is_file(media):
+        return "file"
+
+    # Priority 2: Video
+    if is_video(media):
+        return "vid"
+
+    # Priority 3: Photo
+    if is_photo(media):
+        return "pic"
+
+    # Priority 4: Link (WebPage, URL entity, inline keyboard URL, or raw URL)
+    if is_link(msg):
+        return "link"
+
+    # Priority 5: Plain text
+    text = getattr(msg, "text", None) or getattr(msg, "message", None)
+    if text:
+        return "txt"
+
+    # Priority 6: Other (stickers, voice, contacts, locations, etc.)
+    return "other"
+
+
+# ── File info ─────────────────────────────────────────────────────────────────
+
+def get_file_extension(media) -> str | None:
+    """
+    Extract the lowercase file extension from a document attribute.
+
+    Returns a string like ``".pdf"`` or ``None`` if not available.
+
+    Example:
+        >>> get_file_extension(msg.media)
+        '.pdf'
+    """
+    if not isinstance(media, MessageMediaDocument) or not media.document:
+        return None
+    for attr in media.document.attributes:
+        if isinstance(attr, DocumentAttributeFilename):
+            parts = attr.file_name.rsplit(".", 1)
+            if len(parts) == 2:
+                return f".{parts[1].lower()}"
+    return None
+
+
+def get_file_size(size_bytes: int | None) -> str:
+    """
+    Format *size_bytes* as a human-readable string (e.g. ``"1.23 MB"``).
+
+    Returns ``"Unknown"`` for ``None`` input.
+
+    Example:
+        >>> get_file_size(1048576)
+        '1.0 MB'
+        >>> get_file_size(1048575)
+        '1.0 MB'
+        >>> get_file_size(None)
+        'Unknown'
+    """
+    if size_bytes is None:
+        return "Unknown"
+    if size_bytes == 0:
+        return "0 B"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    idx   = min(int(math.floor(math.log(size_bytes, 1024))), len(units) - 1)
+    val   = round(size_bytes / math.pow(1024, idx), 2)
+    # v3.0.11 fix: rounding can push val up to (or past) 1024 for a size
+    # right at a unit boundary — e.g. 1048575 bytes is 1023.999... KB,
+    # which rounds to 1024.0 and used to display as "1024.0 KB" instead
+    # of bumping to the next unit. Re-check and bump if needed so the
+    # displayed value always stays below 1024.
+    if val >= 1024 and idx < len(units) - 1:
+        idx += 1
+        val = round(size_bytes / math.pow(1024, idx), 2)
+    return f"{val} {units[idx]}"
+
+
+# ── JSON settings persistence ────────────────────────────────────────────────
+#
+# Extracted in version 3.0.1 from four independent, near-identical
+# implementations (auto_clearer.py, auto_forwarder.py, join_left.py — both
+# its main settings and its separate invite cache — and reaction_commands.py).
+# One of the four (auto_clearer.py) turned out NOT to write atomically, unlike
+# the other three — a genuine inconsistency, now fixed as a side effect of
+# sharing this implementation rather than each module's own copy.
+#
+# Deliberately NOT extracted: each module's own validation, type-coercion,
+# and migration logic on the loaded dict (e.g. auto_clearer.py's per-key
+# bool()/int() coercion and its "add `link` key if missing" migration). That
+# logic differs enough between modules that unifying it would risk silently
+# changing one module's validation rules to match another's — only the
+# shared "read this file defensively" / "write this file atomically"
+# mechanics are extracted here.
+
+def read_json_file(path: Path) -> tuple[dict | None, Exception | None]:
+    """
+    Defensively read and parse a JSON object file.
+
+    Returns a ``(data, error)`` pair with exactly one of three shapes:
+        (dict, None)   — file existed and parsed successfully.
+        (None, None)   — file does not exist. This is the expected,
+                         silent first-run case — callers should proceed
+                         with their own defaults, not log anything.
+        (None, exc)    — file exists but could not be read or parsed, or
+                         did not contain a JSON *object*. Callers should
+                         log *exc* and fall back to defaults, since this
+                         indicates real corruption rather than an
+                         expected missing-file state.
+
+    Never raises.
+
+    v3.2.2 (B-04): a file whose contents are valid JSON but NOT an object
+    (``[]``, ``"text"``, ``42``, ``true``, ``null``) used to be returned as
+    ``data`` unchanged, because only *parse* errors were caught. Every
+    caller then did ``data.get(...)`` / ``data.items()`` on it and got an
+    ``AttributeError``. In ``core/loader.py`` that AttributeError escaped
+    ``AccountLoader.load_all()`` -> ``CompositionRoot.start_account()`` ->
+    ``asyncio.gather()`` in ``app/application.py`` and took the WHOLE
+    process down — one account's malformed ``enabled_modules.json`` killed
+    every other, healthy account. The same crash class existed in all five
+    per-module settings readers. Shape is now validated here, once, so a
+    non-object payload is reported as the corruption it is.
+
+    Example:
+        >>> data, err = read_json_file(settings_path)
+        >>> if err is not None:
+        ...     log.error("settings load error: %s", err)
+        >>> if data is not None:
+        ...     apply(data)
+    """
+    if not path.exists():
+        return None, None
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return None, exc
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError) as exc:
+        return None, exc
+    if not isinstance(data, dict):
+        # Valid JSON, wrong shape. Report it as corruption rather than
+        # handing the caller a value it will crash on.
+        return None, ValueError(
+            f"Expected a JSON object, got {type(data).__name__}"
+        )
+    return data, None
+
+
+def write_json_file_atomic(
+    path: Path,
+    data: dict,
+    *,
+    indent: int = 4,
+    tmp_suffix: str = ".tmp",
+) -> Exception | None:
+    """
+    Atomically write *data* as JSON to *path*.
+
+    Writes to a sibling temp file first (``path.with_suffix(tmp_suffix)``),
+    then renames it over *path*. This prevents a crash mid-write from ever
+    leaving a truncated/corrupted settings file — a partial write only ever
+    touches the temp file; the real file is replaced in one atomic
+    filesystem operation.
+
+    Creates *path*'s parent directory if it doesn't exist yet.
+
+    Args:
+        path:       Destination file.
+        data:       JSON-serializable value to write.
+        indent:     `json.dumps` indent (default matches most callers; pass
+                    `indent=2` for the more compact style a couple of
+                    modules use for smaller cache-style files).
+        tmp_suffix: Suffix for the temp file, applied via `Path.with_suffix`.
+                    Override this if *path* already has meaningful dots in
+                    its name that plain `.with_suffix(".tmp")` would clobber,
+                    or to keep an existing distinct temp-file naming
+                    convention (e.g. join_left.py's invite cache uses
+                    ``.cache.tmp`` to keep it visually distinct from its
+                    main settings file's own temp file).
+
+    Returns:
+        ``None`` on success, or the exception on failure. Never raises.
+        (v3.2.0: this used to catch only ``OSError`` while promising "never
+        raises" — a non-serializable value made ``json.dumps`` raise ``TypeError``
+        / ``ValueError`` straight through to the caller. Those are now returned
+        like any other failure; the serialization happens BEFORE the temp file
+        is touched, so a bad value can never damage the existing file.)
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(data, ensure_ascii=False, indent=indent)
+        tmp_path = path.with_suffix(tmp_suffix)
+        tmp_path.write_text(payload, encoding="utf-8")
+        tmp_path.replace(path)
+        return None
+    except (OSError, TypeError, ValueError) as exc:
+        return exc
+
+
+# ── Entity/user formatting (v3.0.10) ─────────────────────────────────────────
+#
+# Extracted from whois_handler.py's `_build_user_info` and info_handler.py's
+# `_get_sender_section`, which each independently built near-identical flag
+# badge lists and status text, with small inconsistencies between the two
+# (e.g. only whois_handler showed the "خودتان" self-flag or the online-status
+# expiry time). Both call sites now use these shared versions.
+
+def truncate(text: str, n: int) -> str:
+    """
+    Truncate *text* to at most *n* characters, appending an ellipsis (…) if
+    it was actually cut. Safe for ``None``/empty input.
+
+    Example:
+        >>> truncate("hello world", 5)
+        'hello…'
+        >>> truncate("hi", 5)
+        'hi'
+    """
+    if not text:
+        return text or ""
+    return text[:n] + ("…" if len(text) > n else "")
+
+
+def format_user_flags(user, *, include_self: bool = False) -> list[str]:
+    """
+    Build the standard list of badge strings (Bot / Verified / Premium /
+    Scam / Fake / Deleted / …) for a Telethon ``User`` entity, based only on
+    the boolean flags the API already exposes on that entity.
+
+    Args:
+        user:         A Telethon ``User`` object (or any object exposing the
+                      same boolean attributes via ``getattr``).
+        include_self: If ``True``, appends "👤 خودتان" when ``user.self`` is
+                      set (whois_handler's behavior). info_handler's sender
+                      section does not show this, so it defaults to ``False``.
+
+    Returns:
+        List of human-readable flag strings, in a fixed, consistent order.
+        Empty list if no flags apply.
+
+    Example:
+        >>> format_user_flags(bot_user)
+        ['🤖 Bot']
+    """
+    flags: list[str] = []
+    if getattr(user, "bot", False):
+        flags.append("🤖 Bot")
+    if getattr(user, "verified", False):
+        flags.append("✅ Verified")
+    if getattr(user, "premium", False):
+        flags.append("⭐ Premium")
+    if getattr(user, "scam", False):
+        flags.append("⚠️ Scam")
+    if getattr(user, "fake", False):
+        flags.append("⚠️ Fake")
+    if getattr(user, "deleted", False):
+        flags.append("🗑 Deleted")
+    if include_self and getattr(user, "self", False):
+        flags.append("👤 خودتان")
+    return flags
+
+
+def format_user_status(status) -> list[str]:
+    """
+    Format a Telethon ``UserStatus*`` object into display-ready lines
+    (already prefixed with "• **...**" bullet markup, matching this
+    codebase's existing whois/info output style).
+
+    Handles ``UserStatusOnline`` (with expiry, if present),
+    ``UserStatusOffline`` (with last-seen time, if the target's privacy
+    settings expose it), ``UserStatusRecently``, and falls back to a generic
+    label for any other/unknown status type. Returns an empty list for
+    ``None`` — this is the normal "status hidden by privacy settings" case
+    and is not treated as an error anywhere that calls this helper.
+
+    Example:
+        >>> format_user_status(None)
+        []
+        >>> format_user_status(some_online_status)
+        ['• **وضعیت آنلاین:** 🟢 آنلاین']
+    """
+    if status is None:
+        return []
+
+    lines: list[str] = []
+
+    if isinstance(status, UserStatusOnline):
+        lines.append("• **وضعیت آنلاین:** 🟢 آنلاین")
+        expires = getattr(status, "expires", None)
+        if expires:
+            try:
+                exp_str = expires.strftime("%Y-%m-%d %H:%M:%S UTC")
+                lines.append(f"  - تا: `{exp_str}`")
+            except Exception:
+                pass
+    elif isinstance(status, UserStatusOffline):
+        was_online = getattr(status, "was_online", None)
+        if was_online:
+            try:
+                was_str = was_online.strftime("%Y-%m-%d %H:%M:%S UTC")
+                lines.append(f"• **آخرین بازدید:** `{was_str}`")
+            except Exception:
+                pass
+        else:
+            lines.append("• **آخرین بازدید:** نامشخص")
+    elif isinstance(status, UserStatusRecently):
+        lines.append("• **آخرین بازدید:** اخیراً")
+    else:
+        status_name = type(status).__name__.replace("UserStatus", "")
+        lines.append(f"• **وضعیت:** {status_name}")
+
+    return lines
+
+
+async def get_profile_photos_safe(client, entity, limit: int = 1) -> list:
+    """
+    Fetch up to *limit* of *entity*'s most recent profile photos via
+    ``client.get_profile_photos()``. Defaults to ``limit=1`` — callers that
+    only need the single most recent photo (the common case) get back a
+    list of at most one ``Photo`` object.
+
+    This only ever returns what Telegram's API is willing to expose under
+    the target's own privacy settings — if photos are hidden or none are
+    set, ``get_profile_photos`` itself returns an empty list (not an error),
+    and that is passed through unchanged here. No attempt is made to work
+    around or bypass that.
+
+    Zero-download note: the ``Photo`` objects returned here carry a server
+    file reference only — no image bytes are downloaded by this call. A
+    caller that passes one of these ``Photo`` objects straight into
+    ``client.send_file(chat, file=photo, ...)`` gets a server-side
+    copy/forward (Telegram MTProto handles it entirely on their end), not a
+    download-then-reupload round trip. Only calling something like
+    ``client.download_media(photo)`` would pull bytes locally — this helper
+    never does that.
+
+    Any flood error is deliberately re-raised (not swallowed) so callers
+    can surface a "please wait N seconds" message, matching the FloodWait
+    convention used everywhere else in this codebase. Any other exception is
+    logged and treated as "no photos available" — a fetch failure should
+    degrade to text-only output, not crash the calling command.
+
+    v3.2.2 (B-01): the re-raise now covers the WHOLE flood family
+    (``FLOOD_ERRORS``), not just ``errors.FloodWaitError``. A
+    ``FloodPremiumWaitError`` used to be swallowed here and reported as
+    "no photos available", so the whois command silently produced a
+    text-only result during a rate limit instead of telling the user to
+    wait.
+
+    Args:
+        client: Active ``TelegramClient``.
+        entity: The user/channel/chat entity to fetch photos for.
+        limit:  Max number of photos to return (default 1).
+
+    Returns:
+        List of ``Photo`` objects (possibly empty), most-recent-first.
+
+    Example:
+        >>> photos = await get_profile_photos_safe(client, user)
+        >>> if photos:
+        ...     await client.send_file(chat, file=photos[0], caption=info_text)
+    """
+    try:
+        photos = await client.get_profile_photos(entity, limit=limit)
+        return list(photos) if photos else []
+    except FLOOD_ERRORS:
+        raise
+    except Exception as exc:
+        log.debug("get_profile_photos_safe failed for %s: %s", entity, exc)
+        return []
+
+
+# ── Numeric-ID entity resolution (v3.1.5) ─────────────────────────────────────
+
+class EntityResolutionError(Exception):
+    """
+    Raised by :func:`resolve_entity_by_id` when a numeric ID could not be
+    resolved to an entity.
+
+    Carries a ready-to-display, user-facing Persian message
+    (``.user_message``) separate from the technical detail (``.detail``,
+    used for logging only) — callers should show ``.user_message`` to the
+    end user rather than the raw underlying exception, which is usually a
+    low-level Telethon/MTProto error that means nothing to a non-technical
+    reader.
+    """
+
+    def __init__(self, user_message: str, detail: str = "") -> None:
+        super().__init__(user_message)
+        self.user_message = user_message
+        self.detail = detail or user_message
+
+
+async def resolve_entity_by_id(client, raw_id: int):
+    """
+    Resolve a bare numeric ID (as typed by a human — user ID, basic-group
+    ID, or channel/supergroup ID in either its raw or public ``-100``-
+    prefixed form) to a Telethon entity, trying every plausible ID shape
+    instead of relying solely on ``client.get_entity(int)``.
+
+    Background — why this exists (v3.1.5, replaces the old
+    ``whois_handler`` behavior of calling ``client.get_entity(int(...))``
+    directly): Telethon's ``get_entity()`` only resolves a *bare* ``int``
+    against its local session entity cache. It never issues a network
+    request for a plain integer, because ``InputUser``/``InputChat``/
+    ``InputChannel`` construction requires an ``access_hash`` (for users
+    and channels) that Telethon has no way to invent — it only has one on
+    hand if this account has already encountered that peer via a dialog,
+    a message, a contact, or a prior successful resolution this session.
+    This is a genuine MTProto/TL-schema constraint, not a Telethon bug or
+    something a client-side fix can fully eliminate; see the Telegram TL
+    schema's ``InputUser``/``InputChannel`` definitions and Telethon's own
+    entity-resolution documentation.
+
+    What this function *does* improve on the old bare call:
+      - Accepts the public ``-100xxxxxxxxxx`` channel/supergroup ID form
+        (the same form ``whois`` itself prints back to the user) by
+        stripping the prefix before resolution, in addition to the raw
+        internal form.
+      - Tries the ID against every plausible peer type (channel, basic
+        group, user) via explicit ``Get*Request`` calls, instead of a
+        single opaque ``get_entity()`` call — this covers a few cases a
+        bare ``get_entity(int)`` cache-miss would not (e.g. an ID that
+        *is* resolvable via ``GetUsersRequest``'s ``InputUser`` with a
+        zero access_hash for basic public profile info, when Telethon's
+        own cache lookup would have refused to even try).
+      - On total failure, raises :class:`EntityResolutionError` with a
+        clear, actionable Persian message instead of letting a raw
+        Telethon ``ValueError``/RPC error reach the end user.
+
+    What it still cannot do: conjure an ``access_hash`` for a private
+    entity this account has never legitimately encountered. That case
+    still fails — deliberately — with a helpful message rather than a
+    silent or confusing one.
+
+    Args:
+        client:  Active ``TelegramClient``.
+        raw_id:  The numeric ID as parsed from user input (may be
+                 positive, plain negative, or ``-100``-prefixed negative).
+
+    Returns:
+        A resolved ``User``/``Chat``/``Channel`` entity.
+
+    Raises:
+        EntityResolutionError: if no resolution strategy succeeds.
+        errors.FloodError: re-raised as-is (never swallowed) so callers
+            can surface a "please wait N seconds" message. v3.2.2 (B-01):
+            the whole flood family is re-raised, not just FloodWaitError.
+    """
+    attempts_detail: list[str] = []
+
+    # ── Strategy 1: channel/supergroup, public "-100…" form or raw form ──
+    #
+    # Public channel IDs are conventionally shown/typed as -100XXXXXXXXXX.
+    # Telethon's *internal* channel ID is the positive XXXXXXXXXX part.
+    # We try both interpretations if the ID is negative and long enough to
+    # plausibly be a -100-prefixed channel ID.
+    if raw_id < 0:
+        str_id = str(raw_id)
+        candidates: list[int] = []
+        if str_id.startswith("-100"):
+            stripped = str_id[4:]
+            if stripped:
+                candidates.append(int(stripped))
+        # Also try the raw magnitude in case it's already the internal
+        # (non-prefixed) channel ID form.
+        magnitude = -raw_id
+        if magnitude not in candidates:
+            candidates.append(magnitude)
+
+        for channel_id in candidates:
+            try:
+                result = await client(GetChannelsRequest(
+                    id=[InputChannel(channel_id=channel_id, access_hash=0)]
+                ))
+                if result and getattr(result, "chats", None):
+                    return result.chats[0]
+            except FLOOD_ERRORS:
+                raise
+            except Exception as exc:
+                attempts_detail.append(f"channel({channel_id}): {exc}")
+
+        # ── Strategy 2: basic (non-super) group — plain negative ID ──
+        try:
+            result = await client(GetChatsRequest(id=[magnitude]))
+            if result and getattr(result, "chats", None):
+                return result.chats[0]
+        except FLOOD_ERRORS:
+            raise
+        except Exception as exc:
+            attempts_detail.append(f"chat({magnitude}): {exc}")
+
+    else:
+        # ── Strategy 3: user — positive ID ──
+        try:
+            result = await client(GetUsersRequest(
+                id=[InputUser(user_id=raw_id, access_hash=0)]
+            ))
+            if result:
+                return result[0]
+        except FLOOD_ERRORS:
+            raise
+        except Exception as exc:
+            attempts_detail.append(f"user({raw_id}): {exc}")
+
+    # ── Last resort: give Telethon's own cache-based resolver a try too —
+    # covers the case where this ID *is* already cached (e.g. the account
+    # recently interacted with it), which the explicit attempts above
+    # don't specifically special-case. ──
+    try:
+        return await client.get_entity(raw_id)
+    except FLOOD_ERRORS:
+        raise
+    except Exception as exc:
+        attempts_detail.append(f"get_entity({raw_id}): {exc}")
+
+    log.debug(
+        "resolve_entity_by_id(%s) failed after %d attempt(s): %s",
+        raw_id,
+        len(attempts_detail),
+        " | ".join(attempts_detail),
+    )
+    raise EntityResolutionError(
+        user_message=(
+            f"⚠️ این اکانت قبلاً با شناسه `{raw_id}` تعاملی نداشته است.\n"
+            "لطفاً از `@username` استفاده کنید یا به یکی از پیام‌های این "
+            "کاربر/گروه پاسخ دهید."
+        ),
+        detail=" | ".join(attempts_detail) or "no resolution strategy attempted",
+    )
