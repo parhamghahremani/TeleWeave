@@ -1,206 +1,242 @@
 #!/usr/bin/env bash
 #
-# update.sh — Safe updater for userbot_own.
+# update.sh — Safe fast-forward-only updater for TeleWeave/Userbot.
 #
 # Usage:
 #   bash ~/userbot_own/update.sh
-#   OR via the launcher: userbot update
+#   teleweave update
 #
-# Guarantees:
-#   - If the code did not actually change, this script says so explicitly.
-#   - If the pull fails for ANY reason, this script FAILS LOUDLY — it never
-#     prints success after a failed pull.
-#   - accounts/, .env, and data/ are never touched, and this is verified,
-#     not assumed.
+# This script never uses git reset --hard. It refuses tracked local changes,
+# unpushed commits, and remote changes that would track protected user data.
 
-set -euo pipefail
+set -Eeuo pipefail
 
-INSTALL_DIR="${HOME}/userbot_own"
-VENV_PIP="${INSTALL_DIR}/.venv/bin/pip"
+# Resolve the installation from this script's own location. This avoids a
+# hidden dependency on the caller's current directory or HOME value.
+INSTALL_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 VENV_PY="${INSTALL_DIR}/.venv/bin/python"
 
-# ---------------------------------------------------------------------------
-# Output helpers
-# ---------------------------------------------------------------------------
-if [ -t 1 ]; then
-  R="\033[0m"; B="\033[1m"; G="\033[32m"; Y="\033[33m"; E="\033[31m"; C="\033[36m"
+if [[ -t 1 ]]; then
+  R=$'\033[0m'; B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; E=$'\033[31m'; C=$'\033[36m'
 else
   R=""; B=""; G=""; Y=""; E=""; C=""
 fi
 
-log()  { printf "%b[update]%b %s\n" "$C" "$R" "$1"; }
-ok()   { printf "%b[  OK  ]%b %s\n" "$G" "$R" "$1"; }
-warn() { printf "%b[ WARN ]%b %s\n" "$Y" "$R" "$1"; }
-die()  { printf "%b[ FAIL ]%b %s\n" "$E" "$R" "$1"; exit 1; }
+log()  { printf '%b[update]%b %s\n' "$C" "$R" "$1"; }
+ok()   { printf '%b[  OK  ]%b %s\n' "$G" "$R" "$1"; }
+warn() { printf '%b[ WARN ]%b %s\n' "$Y" "$R" "$1" >&2; }
+die()  { printf '%b[ FAIL ]%b %s\n' "$E" "$R" "$1" >&2; exit 1; }
 
-# ---------------------------------------------------------------------------
-# 0. Sanity checks
-# ---------------------------------------------------------------------------
-[ -d "${INSTALL_DIR}/.git" ] \
-  || die "Installation not found at ${INSTALL_DIR}. Run the installer first:
-  curl -fsSL https://raw.githubusercontent.com/pppppuhdtxd/userbot_own/main/install.sh | bash"
+on_error() {
+  local status=$?
+  printf '%b[ FAIL ]%b Update stopped at line %s (exit %s).\n' "$E" "$R" "${BASH_LINENO[0]:-?}" "$status" >&2
+  exit "$status"
+}
+trap on_error ERR
 
-[ -x "$VENV_PY" ] \
-  || die "Virtual environment not found at ${INSTALL_DIR}/.venv. Re-run the installer."
+PROTECTED_PATHS=(
+  "accounts" ".env" "data"
+  "Userbot/accounts" "Userbot/.env" "Userbot/data"
+)
+EXISTING_PROTECTED_PATHS=()
 
-# v3.0.11: install.sh now refuses to create a venv with Python <3.11, but an
-# existing venv predating that fix (or hand-made) could still be stale.
-# Verify the interpreter actually inside it, not just that install.sh once
-# checked one — a version drift here would otherwise surface later as a
-# confusing pip/runtime failure instead of this clear message up front.
-PY_VERSION="$("$VENV_PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo "unknown")"
+path_exists() {
+  [[ -e "$1" || -L "$1" ]]
+}
+
+# Git status checks every file beneath a directory (including nested files),
+# so rules such as "accounts/*" work without requiring the directory itself to
+# match an ignore pattern. Any non-ignored untracked file makes this fail.
+protected_path_is_ignored() {
+  local rel="$1"
+  local unignored
+  unignored="$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=all -- "$rel")" || return 1
+  [[ -z "$unignored" ]]
+}
+
+read_version() {
+  local value="unknown"
+  if [[ -f "${INSTALL_DIR}/VERSION" ]]; then
+    IFS= read -r value < "${INSTALL_DIR}/VERSION" || true
+  fi
+  printf '%s\n' "${value:-unknown}"
+}
+
+assert_protected_paths_safe() {
+  local rel tracked
+  for rel in "${PROTECTED_PATHS[@]}"; do
+    tracked="$(git -C "$INSTALL_DIR" ls-files -- "$rel" "${rel%/}/" 2>/dev/null || true)"
+    if [[ -n "$tracked" ]]; then
+      printf '%s\n' "$tracked" | sed 's/^/         /' >&2
+      die "Protected user-data path '${rel}' is tracked by Git. Refusing to update."
+    fi
+
+    if path_exists "${INSTALL_DIR}/${rel}"; then
+      if ! protected_path_is_ignored "$rel"; then
+        die "Existing user data '${INSTALL_DIR}/${rel}' is not ignored by Git. Add a matching .gitignore rule; no update was applied."
+      fi
+      EXISTING_PROTECTED_PATHS+=("$rel")
+    fi
+  done
+}
+
+assert_remote_does_not_track_protected_paths() {
+  local remote_ref="$1" rel remote_tracked
+  for rel in "${PROTECTED_PATHS[@]}"; do
+    remote_tracked="$(git -C "$INSTALL_DIR" ls-tree -r --name-only "$remote_ref" -- "$rel" "${rel%/}/" 2>/dev/null || true)"
+    if [[ -n "$remote_tracked" ]]; then
+      printf '%s\n' "$remote_tracked" | sed 's/^/         /' >&2
+      die "Remote branch contains files inside protected path '${rel}'. Refusing to merge."
+    fi
+  done
+}
+
+verify_protected_paths_preserved() {
+  local rel
+  for rel in "${EXISTING_PROTECTED_PATHS[@]}"; do
+    path_exists "${INSTALL_DIR}/${rel}" \
+      || die "Previously existing user data disappeared: ${INSTALL_DIR}/${rel}"
+    protected_path_is_ignored "$rel" \
+      || die "The updated .gitignore no longer ignores '${rel}'. The data path still exists, but future updates are blocked until this is fixed."
+  done
+}
+
+# -----------------------------------------------------------------------------
+# 0. Preconditions
+# -----------------------------------------------------------------------------
+[[ -d "${INSTALL_DIR}/.git" ]] \
+  || die "Installation not found at ${INSTALL_DIR}. Run install.sh first."
+[[ -x "$VENV_PY" ]] \
+  || die "Virtual environment not found at ${INSTALL_DIR}/.venv. Re-run install.sh."
+
+PY_VERSION="$("$VENV_PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo unknown)"
 if [[ ! "$PY_VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
-  die "Could not determine the venv interpreter's version (${VENV_PY})."
+  die "Could not determine the virtual environment Python version (${VENV_PY})."
 fi
 PY_MAJOR="${PY_VERSION%%.*}"
 PY_MINOR="${PY_VERSION##*.}"
-if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 11 ]; }; then
-  die "The virtual environment at ${INSTALL_DIR}/.venv uses Python ${PY_VERSION},
-  but Python 3.11+ is required. Remove it and re-run the installer:
-    rm -rf ${INSTALL_DIR}/.venv && bash ${INSTALL_DIR}/install.sh"
+if [[ "$PY_MAJOR" -lt 3 || ( "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 11 ) ]]; then
+  die "The virtual environment uses Python ${PY_VERSION}; Python 3.11+ is required. Re-create .venv with a newer Python interpreter."
 fi
-
-VERSION_FILE="${INSTALL_DIR}/VERSION"
-read_version() { [ -f "$VERSION_FILE" ] && cat "$VERSION_FILE" || echo "unknown"; }
 
 OLD_VERSION="$(read_version)"
-OLD_SHA="$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+OLD_SHA="$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
-# ---------------------------------------------------------------------------
-# 1. Detect a dirty working tree BEFORE attempting the pull.
-#    This is the #1 cause of a fast-forward pull silently failing:
-#    a modified/untracked file the update script itself doesn't own.
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# 1. Refuse tracked local changes before fetching or merging.
+# -----------------------------------------------------------------------------
 log "Checking repository state..."
-# -uno: ignore untracked files. Untracked files (e.g. accounts/, data/ if not
-# yet gitignored) can never block a fast-forward pull, so they must never
-# trigger this check — only modifications to files git already tracks can.
-DIRTY_FILES="$(git -C "$INSTALL_DIR" status --porcelain -uno 2>/dev/null || true)"
-if [ -n "$DIRTY_FILES" ]; then
-  warn "Local changes to tracked files detected:"
-  echo "$DIRTY_FILES" | sed 's/^/         /'
-  die "Cannot safely fast-forward with local changes present. Resolve or discard
-  them (e.g. 'git -C ${INSTALL_DIR} stash') and re-run update. Refusing to
-  guess at a merge, since that risks your account data if it lives inside
-  the tracked tree."
+DIRTY_FILES="$(git -C "$INSTALL_DIR" status --porcelain --untracked-files=no 2>/dev/null || true)"
+if [[ -n "$DIRTY_FILES" ]]; then
+  warn "Tracked local modifications were found:"
+  printf '%s\n' "$DIRTY_FILES" | sed 's/^/         /'
+  die "Cannot safely update with tracked local changes. Commit or stash them, then retry."
 fi
-ok "Working tree clean (untracked files, if any, are not a blocker)."
+ok "No tracked local modifications found."
 
-# ---------------------------------------------------------------------------
-# 2. Sync to origin. This device is assumed to be a deployment target, not
-#    a place code is developed — origin is assumed authoritative. We already
-#    confirmed the tracked working tree is clean (step 1), so a hard reset
-#    to origin cannot lose any uncommitted work.
-#
-#    v3.0.11: that assumption used to be asserted only in this comment, not
-#    checked. A repo audit found a real case where it didn't hold — local
-#    had 8 commits (an entire architecture refactor) that were never pushed,
-#    which `reset --hard origin/<branch>` would have silently discarded on
-#    the next update. Verify the assumption instead of trusting it: refuse
-#    to proceed if HEAD has commits origin doesn't have yet.
-# ---------------------------------------------------------------------------
-log "Fetching latest code..."
-git -C "$INSTALL_DIR" fetch --quiet origin \
-  || die "git fetch failed. Check your network connection and try again."
+assert_protected_paths_safe
 
-BRANCH="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+# -----------------------------------------------------------------------------
+# 2. Fetch and validate branch ancestry. No hard reset is ever used.
+# -----------------------------------------------------------------------------
+log "Fetching latest code from origin..."
+git -C "$INSTALL_DIR" fetch --prune origin \
+  || die "git fetch failed. Check network access and the origin remote."
 
-AHEAD_COUNT="$(git -C "$INSTALL_DIR" rev-list --count "origin/${BRANCH}..HEAD" 2>/dev/null || echo 0)"
-if [ "$AHEAD_COUNT" != "0" ]; then
-  die "Local branch '${BRANCH}' has ${AHEAD_COUNT} commit(s) that are not on
-  origin/${BRANCH}. Continuing would run 'git reset --hard', which silently
-  DISCARDS them. This usually means this machine is also where the code is
-  developed, not only a deployment target. Push those commits first:
-    git -C ${INSTALL_DIR} push origin ${BRANCH}
-  then re-run update. If they were never meant to be here, remove or rebase
-  them off first instead — either way, this script won't guess for you."
+BRANCH="$(git -C "$INSTALL_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+[[ -n "$BRANCH" ]] || die "Repository is in detached-HEAD state. Check out its deployment branch first."
+REMOTE_REF="refs/remotes/origin/${BRANCH}"
+git -C "$INSTALL_DIR" show-ref --verify --quiet "$REMOTE_REF" \
+  || die "Remote branch origin/${BRANCH} was not found. Refusing to guess a branch."
+
+AHEAD_COUNT="$(git -C "$INSTALL_DIR" rev-list --count "${REMOTE_REF}..HEAD")"
+if [[ "$AHEAD_COUNT" != "0" ]]; then
+  die "Local branch '${BRANCH}' has ${AHEAD_COUNT} commit(s) not present on origin/${BRANCH}. Push or intentionally reconcile them before updating. No local commits were discarded."
 fi
 
-git -C "$INSTALL_DIR" reset --hard "origin/${BRANCH}" --quiet \
-  || die "git reset --hard origin/${BRANCH} failed. Check the error above."
+assert_remote_does_not_track_protected_paths "$REMOTE_REF"
 
-NEW_SHA="$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+BEHIND_COUNT="$(git -C "$INSTALL_DIR" rev-list --count "HEAD..${REMOTE_REF}")"
+if [[ "$BEHIND_COUNT" == "0" ]]; then
+  ok "Code is already up to date."
+else
+  log "Applying ${BEHIND_COUNT} remote commit(s) with a fast-forward-only merge..."
+  git -C "$INSTALL_DIR" merge --ff-only --no-edit "$REMOTE_REF" \
+    || die "Fast-forward update failed. Git did not reset the local branch; inspect the error and retry after resolving it."
+fi
+
+NEW_SHA="$(git -C "$INSTALL_DIR" rev-parse --short HEAD)"
 NEW_VERSION="$(read_version)"
+verify_protected_paths_preserved
 
-if [ "$OLD_SHA" = "$NEW_SHA" ]; then
-  ok "Already up to date (${NEW_VERSION} @ ${NEW_SHA}). No new commits to apply."
+if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
+  ok "No code changes were needed (${NEW_VERSION} @ ${NEW_SHA})."
 else
-  ok "Code updated."
+  ok "Code updated: ${OLD_VERSION} @ ${OLD_SHA} -> ${NEW_VERSION} @ ${NEW_SHA}."
 fi
 
-# ---------------------------------------------------------------------------
-# 3. Clear stale bytecode. This is the single most common reason a fix
-#    that was genuinely pulled still doesn't appear to run after restart.
-# ---------------------------------------------------------------------------
-log "Clearing stale bytecode caches..."
-PYC_DIR_COUNT="$(find "$INSTALL_DIR" -type d -name '__pycache__' 2>/dev/null | wc -l | tr -d ' ')"
-find "$INSTALL_DIR" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
-find "$INSTALL_DIR" -type f -name '*.pyc' -delete 2>/dev/null || true
-ok "Cleared ${PYC_DIR_COUNT} stale __pycache__ director$([ "$PYC_DIR_COUNT" = "1" ] && echo y || echo ies)."
+# -----------------------------------------------------------------------------
+# 3. Clear project bytecode only. Keep .venv and Git metadata intact.
+# -----------------------------------------------------------------------------
+log "Clearing stale project bytecode caches..."
+CODE_ROOT="$INSTALL_DIR"
+if [[ -d "${INSTALL_DIR}/Userbot" && -f "${INSTALL_DIR}/Userbot/main.py" ]]; then
+  CODE_ROOT="${INSTALL_DIR}/Userbot"
+elif [[ -f "${INSTALL_DIR}/main.py" ]]; then
+  CODE_ROOT="$INSTALL_DIR"
+else
+  die "Could not find main.py in the repository root or Userbot/ directory. Re-run install.sh after checking the repository layout."
+fi
 
-# ---------------------------------------------------------------------------
-# 4. Dependencies — explicit venv pip, never bare pip/pip3.
-# ---------------------------------------------------------------------------
-log "Upgrading pip inside the virtual environment..."
-"$VENV_PY" -m pip install --upgrade pip >/dev/null 2>&1 \
-  || warn "pip self-upgrade failed; continuing with existing pip."
+find "$CODE_ROOT" \
+  \( -type d \( -name .git -o -name .venv -o -name venv \) -prune \) -o \
+  \( -type d -name '__pycache__' -prune -exec rm -rf {} + \) 2>/dev/null || true
+find "$CODE_ROOT" \
+  \( -type d \( -name .git -o -name .venv -o -name venv \) -prune \) -o \
+  \( -type f -name '*.pyc' -delete \) 2>/dev/null || true
+ok "Project bytecode caches cleared; the virtual environment was excluded."
 
+# -----------------------------------------------------------------------------
+# 4. Upgrade dependencies using the virtual environment's interpreter.
+# -----------------------------------------------------------------------------
 REQUIREMENTS_FILE="${INSTALL_DIR}/requirements.txt"
-if [ -f "$REQUIREMENTS_FILE" ]; then
+log "Upgrading pip inside the virtual environment..."
+"$VENV_PY" -m pip install --disable-pip-version-check --retries 1 --timeout 15 --upgrade pip >/dev/null 2>&1 \
+  || warn "pip self-upgrade failed; continuing with the existing pip version."
+
+if [[ -f "$REQUIREMENTS_FILE" ]]; then
   log "Installing/upgrading dependencies from requirements.txt..."
-  "$VENV_PIP" install -r "$REQUIREMENTS_FILE" \
-    || die "Dependency upgrade failed. See pip output above. The code has
-  already been updated — your bot may not run correctly until dependencies
-  are fixed. Try running manually:
-    ${VENV_PIP} install -r ${REQUIREMENTS_FILE}"
-  ok "Dependencies up to date."
+  if "$VENV_PY" -m pip install --disable-pip-version-check --retries 2 --timeout 20 -r "$REQUIREMENTS_FILE"; then
+    if "$VENV_PY" -m pip check; then
+      ok "Dependencies are up to date and dependency metadata is consistent."
+    else
+      die "pip check found incompatible or missing dependencies. Repair the virtual environment before restarting the bot."
+    fi
+  else
+    die "Dependency installation failed. Code has already been fast-forwarded, but the bot may not run until dependencies are repaired. Run: ${VENV_PY} -m pip install --disable-pip-version-check --retries 2 --timeout 20 -r ${REQUIREMENTS_FILE}"
+  fi
 else
-  warn "No requirements.txt found; skipping dependency upgrade."
+  warn "No requirements.txt found; dependency upgrade was skipped."
 fi
 
-# ---------------------------------------------------------------------------
-# 5. Post-update smoke test — confirm the updated tree actually imports.
-#    This does NOT catch every runtime bug, but it does catch syntax
-#    errors and import breakage that would otherwise surface as a crash
-#    the next time the bot is started, with no chance to roll back first.
-# ---------------------------------------------------------------------------
-log "Running post-update sanity check (py_compile)..."
-CODE_ROOT="${INSTALL_DIR}"
-[ -d "${INSTALL_DIR}/userbot" ] && CODE_ROOT="${INSTALL_DIR}/userbot"
-
-if "$VENV_PY" -m compileall -q "$CODE_ROOT"; then
-  ok "All Python files compile cleanly."
+# -----------------------------------------------------------------------------
+# 5. Syntax check. compileall does not execute imports or test runtime behavior.
+# A failure is fatal: this script must not report a successful update.
+# -----------------------------------------------------------------------------
+log "Running Python syntax check (compileall)..."
+if "$VENV_PY" -m compileall -q -x '(^|/)(\.git|\.venv|venv|accounts|data)(/|$)' "$CODE_ROOT"; then
+  ok "Python syntax check passed. (This checks compilation, not runtime imports.)"
 else
-  warn "One or more files failed to compile. The update has already been
-  applied to disk — review the error above before restarting the bot."
+  die "Python syntax check failed. Update is incomplete; review the compileall errors above before starting the bot."
 fi
 
-# ---------------------------------------------------------------------------
-# 6. Data-safety confirmation — verify, don't just assert.
-# ---------------------------------------------------------------------------
-GITIGNORE_FILE="${INSTALL_DIR}/.gitignore"
-SAFE=true
-if [ -f "$GITIGNORE_FILE" ]; then
-  for pattern in "accounts" ".env" "data"; do
-    grep -qE "(^|/)${pattern}(/|$)" "$GITIGNORE_FILE" || SAFE=false
-  done
-else
-  SAFE=false
-fi
-if $SAFE; then
-  ok "accounts/, .env, and data/ confirmed git-ignored — untouched by this update."
-else
-  warn "Could not fully confirm accounts/, .env, and data/ are git-ignored.
-  They were not touched by this script regardless (only 'git pull' and
-  'pip install' were run), but double-check your .gitignore."
-fi
+# Reconfirm the paths after all update steps.
+verify_protected_paths_preserved
 
-# ---------------------------------------------------------------------------
-# 7. Version transition banner — the one line that matters most.
-# ---------------------------------------------------------------------------
-echo
-printf "%b%s%b\n" "$B" "──────────────────────────────────────────" "$R"
-printf "  Version:  %s (%s)  →  %s (%s)\n" "$OLD_VERSION" "$OLD_SHA" "$NEW_VERSION" "$NEW_SHA"
-printf "%b%s%b\n" "$B" "──────────────────────────────────────────" "$R"
-echo
-ok "Update complete. Run 'userbot' to start."
+# -----------------------------------------------------------------------------
+# 6. Summary
+# -----------------------------------------------------------------------------
+printf '\n%b%s%b\n' "$B" '──────────────────────────────────────────' "$R"
+printf '  Version: %s (%s) -> %s (%s)\n' "$OLD_VERSION" "$OLD_SHA" "$NEW_VERSION" "$NEW_SHA"
+printf '%b%s%b\n\n' "$B" '──────────────────────────────────────────' "$R"
+ok "Update completed. Run 'teleweave' to start the bot."

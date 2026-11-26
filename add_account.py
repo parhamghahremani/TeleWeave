@@ -2,7 +2,7 @@
 """
 add_account.py  (repository root)
 ════════════════════════════════════════════════════════════════
-Thin launcher — delegates to userbot_own.account_management.cli.main().
+Thin launcher — delegates to Userbot.account_management.cli.main().
 Supports: help
 ...
 """
@@ -10,7 +10,7 @@ import sys
 
 sys.dont_write_bytecode = True  # Prevent __pycache__ folders
 
-from userbot_own.account_management.cli import main
+from Userbot.account_management.cli import main
 
 if __name__ == "__main__":
     # Handle help at launcher level for consistency

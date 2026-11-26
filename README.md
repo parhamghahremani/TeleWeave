@@ -15,19 +15,19 @@ This single command will:
 3. Clone this repository to `~/userbot_own`.
 4. Create an isolated virtual environment and install everything in
    `requirements.txt` into it.
-5. Register a global `userbot` command so you can launch things from
+5. Register a global `teleweave` command so you can launch things from
    anywhere in your terminal — no `cd`-ing into the project folder required.
 
 Once installed, just run:
 
 ```bash
-userbot
+teleweave
 ```
 
 You'll get an interactive menu:
 
 ```
-=== userbot_own — v3.2.11 ===
+=== TeleWeave/Userbot — v3.2.13 ===
 1) Run bot
 2) Manage accounts
 3) Connection settings
@@ -50,17 +50,17 @@ Your choice [1-5]:        ← single keypress, no Enter needed
 You can also skip the menu with direct shortcuts:
 
 ```bash
-userbot run      # start the bot directly
-userbot add      # jump straight to account management
-userbot settings # connection settings (direct / SOCKS5 / CF)
-userbot update   # update directly
+teleweave run      # start the bot directly
+teleweave add      # jump straight to account management
+teleweave settings # connection settings (direct / SOCKS5 / CF)
+teleweave update   # update directly
 ```
 
 > Re-running the install command above at any time is safe — it's
 > idempotent and will simply refresh your existing installation rather
 > than creating a duplicate or overwriting your account data.
 
-> **Before you run `userbot update` on a machine you also develop on:**
+> **Before you run `teleweave update` on a machine you also develop on:**
 > `update.sh` makes your local checkout exactly match `origin/<branch>` —
 > that's the whole point, it's how you get the latest fixes. If this
 > machine has commits that were never pushed, syncing to origin would
@@ -78,7 +78,7 @@ Termux/Debian/Ubuntu), see the [Quick Start](#quick-start) section below.
 A professional, async, hot-reload-capable Telegram account management system
 built with Python 3.11+ and [Telethon](https://docs.telethon.dev/).
 
-**Current version:** `3.2.12`
+**Current version:** `3.2.13`
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
@@ -153,7 +153,7 @@ pip install -r requirements.txt
 # 4. Add your first account
 python add_account.py
 
-# 5. (Optional) Configure environment variables — create userbot_own/.env yourself
+# 5. (Optional) Configure environment variables — create Userbot/.env yourself
 #    with any overrides from the Configuration table below, for example:
 #    LOG_LEVEL=INFO
 
@@ -162,7 +162,7 @@ python main.py
 ```
 
 Both commands run from the **repository root** — there's no need to `cd
-userbot_own/` first (earlier versions required this because of how imports
+Userbot/` first (earlier versions required this because of how imports
 resolved; this version uses proper package imports throughout).
 
 ---
@@ -176,12 +176,12 @@ userbot_own/
 ├── README.md                      ← this file
 ├── requirements.txt
 ├── pyproject.toml                 ← ruff configuration + project metadata
-├── main.py                        ← thin launcher → userbot_own.app.application.main()
-├── add_account.py                 ← thin launcher → userbot_own.account_management.cli.main()
-├── settings.py                    ← thin launcher → userbot_own.settings_menu.cli.main() (v3.2.7)
+├── main.py                        ← thin launcher → Userbot.app.application.main()
+├── add_account.py                 ← thin launcher → Userbot.account_management.cli.main()
+├── settings.py                    ← thin launcher → Userbot.settings_menu.cli.main() (v3.2.7)
 ├── run.bat                        ← Windows control menu (run / accounts / settings / exit)
 │
-└── userbot_own/
+└── Userbot/
     ├── __init__.py                ← exposes __version__ (reads VERSION)
     ├── .env                        ← optional, created by you (git-ignored) — see Configuration
     │
@@ -273,9 +273,9 @@ userbot_own/
     │   ├── packages/                 ← one logical module per folder
     │   │   └── bot_link_starter/     ← start the bot links in a Quote & Reply
     │   │       ├── __init__.py
-    │   │       ├── info.py
-    │   │       ├── links.py
-    │   │       └── handlers.py
+    │   │   ├── info.py
+    │       │   ├── links.py
+    │   │   └── handlers.py
     │   └── __init__.py
     │
     ├── account_management/
@@ -313,7 +313,7 @@ userbot_own/
 
 ### Composition root
 
-`userbot_own/app/composition_root.py` is the only place that constructs the
+`Userbot/app/composition_root.py` is the only place that constructs the
 application-scoped singletons: `AccountLoaderRegistry` and `AccountRegistry`.
 Everything else — every plugin module, the loader, the reconnector —
 receives what it needs through its constructor. Nothing reaches for a
@@ -339,7 +339,7 @@ A module is a *logical unit* with a name. It can be written in one file
 (`modules/packages/<name>/`) — the loader treats both identically. The
 shared infrastructure in `modules/_infra/` is skipped by discovery (the
 leading underscore is the existing convention for "not a plugin"), and the
-old import paths `userbot_own.modules.base` / `.router` / `.bridge` still
+old import paths `Userbot.modules.base` / `.router` / `.bridge` still
 work through thin re-export shims.
 
 Every module also has an **info file** holding its help texts and
@@ -409,7 +409,7 @@ The bot's connection to Telegram is a **system-wide** setting — one mode for
 the whole process: every account of the running bot *and* the login/verify
 clients of `add_account.py` alike. It is never per-account. Three modes are
 available, managed by the Settings menu (`settings.py`; on Windows run.bat
-option **[3]**, on Termux/Linux `userbot settings` or menu option **3**).
+option **[3]**, on Termux/Linux `teleweave settings` or menu option **3**).
 Every option in the menu is a **single keypress** that saves immediately —
 no Enter, no confirmation screens:
 
@@ -470,7 +470,7 @@ python settings.py set-cf-worker userbot-relay.your-subdomain.workers.dev
 python settings.py test        # verify the route answers the WS handshake
 ```
 
-(On Termux/Linux: `userbot settings set-cf-worker …` — the launcher passes
+(On Termux/Linux: `teleweave settings set-cf-worker …` — the launcher passes
 the subcommand through.)
 
 No API keys, no secret tokens — the Worker relays WebSocket bytes only, and
@@ -506,869 +506,3 @@ based on strict priority. This ensures consistent behavior across all modules
 | 6 | `other` | Sticker, voice, contact, location, poll, etc. |
 
 ### Example Classification
-
-| Message | Classified As |
-| --- | --- |
-| `"Hello world"` | `txt` |
-| `"Check out https://github.com/file.exe"` (with WebPage) | `link` |
-| `"Hello"` + photo | `pic` |
-| `"Check this"` + video | `vid` |
-| PDF attachment | `file` |
-| Sticker | `other` |
-
----
-
-## Account Setup
-
-### Automatic (recommended)
-
-```bash
-python add_account.py
-```
-
-Option 1 ("Add new account") offers two ways in:
-- **Full login** — the classic phone + code (+ 2FA) flow.
-- **Import existing string session** — paste an already-authorized Telethon
-  `StringSession` (plus `api_id`/`api_hash`) instead of logging in again; no
-  new Telegram auth key is created, and phone/name are auto-filled from the
-  account itself.
-
-On every successful login (new account or re-login), the tool also derives
-and saves a `StringSession` backup of that login into `account.json`
-automatically — see the `session_string` field below.
-
-### Manual
-
-Create `userbot_own/accounts/N/account.json` (replace `N` with a number):
-
-```json
-{
-    "api_id":   12345678,
-    "api_hash": "your_api_hash_here",
-    "phone":    "+989123456789"
-}
-```
-
-Then restart the bot.
-
-An optional `"label"` field is supported for your own reference when using
-`python add_account.py`'s account list (option 5); it isn't read by the bot
-itself.
-
-An optional `"session_string"` field (added in v3.1.3) holds a Telethon
-`StringSession` value. When present, it takes priority over the file-based
-`session.session` for that account — useful as a backup so you don't have to
-repeat phone + code + 2FA if `session.session` is ever lost or corrupted.
-When absent, nothing changes: the account uses the file-based session exactly
-as before.
-
----
-
-## Configuration
-
-All settings can be overridden via environment variables or a `.env` file
-in the `userbot_own/` directory — a plain `KEY=value` file, e.g. `LOG_LEVEL=INFO`.
-Create it yourself: it is git-ignored, and no `.env.example` ships with the project.
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `LOG_LEVEL` | `DEBUG` | Root logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `BACKOFF_START` | `1` | Initial reconnect back-off in seconds — **currently has no effect** (see note) |
-| `BACKOFF_MAX` | `300` | Maximum reconnect back-off in seconds — **currently has no effect** (see note) |
-| `HISTORY_LIMIT` | `2000` | Max messages scanned by clearer / auto_clearer modules |
-| `FAST_RECONNECT_ENABLED` | `true` | Master switch for the fast-reconnect behavior (`3.1.1`) |
-| `FAST_RECONNECT_HEALTHY_INTERVAL` | `30` | Seconds between health checks when connected |
-| `FAST_RECONNECT_PROBE_INTERVAL` | `3` | Seconds between connectivity probes while backing off from an outage |
-
-> **Note:** `BACKOFF_START` and `BACKOFF_MAX` are loaded into `Settings`, but nothing
-> reads them — the reconnect back-off schedule is fixed inside `core/reconnector.py`.
-> The reconnect settings that *do* work are the `FAST_RECONNECT_*` variables (see the
-> FAQ entry on fast reconnect below). Checked in v3.1.10.
->
-> **Note (v3.2.2):** the `FAST_RECONNECT_*` variables used to be listed only in the
-> FAQ. They are now in this table too, so the Configuration section really is the
-> single place every environment variable is documented.
-
----
-
-## Available Commands
-
-All commands are sent as outgoing messages (i.e. messages *you* send). This
-is a single-owner tool — every configured account is equal, and any command
-below works from any of your own accounts without a separate permission
-system.
-
-### System (Saved Messages only)
-
-| Command | Description |
-| --- | --- |
-| `.modules` | List all loaded plugins for this account |
-| `.account` | Show current account info |
-| `.stats` | System statistics — accounts configured, accounts connected, total modules loaded, uptime |
-| `.ping` | API + edit latency, connection quality rating |
-
-### Module Manager (Saved Messages only) — v3.1.0
-
-Controls which files in `modules_extra/` are active for *this* account.
-Core modules in `modules/` are unaffected — they always load and can't be
-disabled this way. See [Extra Modules](#extra-modules-modules_extra) below
-for the full system.
-
-| Command | Description |
-| --- | --- |
-| `.extra` | List all available extra modules with ✅ enabled / ❌ disabled status |
-| `.extra enable <name>` | Enable a module — loads and starts it immediately, no restart |
-| `.extra disable <name>` | Disable a module — tears it down immediately, no restart |
-| `.extra info <name>` | Status, category, and description for one extra module |
-
-### Help System (Saved Messages only)
-
-Like the Module Manager above, `help` only responds inside Saved Messages —
-elsewhere the command is ignored (v3.2.1: the block is now recorded as a log
-line so it can be diagnosed instead of looking like a dead command). Module
-help longer than Telegram's ~4096-character message limit arrives as more than
-one message.
-
-| Command | Description |
-| --- | --- |
-| `help` | Category-based compact help (7 logical groups) |
-| `help <module>` | Extended help for one module, e.g. `help clearer`. For a disabled `modules_extra/` module, shows the exact `.extra enable` command instead of a generic "not found". |
-
-### Reaction Commands (`reaction_commands` module)
-
-Execute commands by reacting to messages with emojis. Detection is entirely
-push-based (`UpdateMessageReactions` + `UpdateEditMessage` — no polling of
-any kind). Only **bot** chats are enabled by default; private chats with
-users, groups and channels are disabled by default and are toggled at
-runtime with the `.reaction_scope` command (the old `ENABLE_FOR_*` class
-attributes were removed in `3.0.8` — do not look for them). Configuration is
-per-account in `data/settings/account{N}/reactions.json` (the mappings) and
-`data/settings/account{N}/reaction_scope.json` (the active scopes).
-
-**Management commands (in Saved Messages only):**
-
-| Command | Description |
-| --- | --- |
-| `reactions` | Show all configured emoji→command mappings |
-| `reaction add <emoji> <command>` | Add a new mapping |
-| `reaction remove <emoji>` | Remove a mapping |
-| `reaction clear` | Remove all mappings |
-
-**Example usage:**
-
-```
-# Setup (in Saved Messages):
-reaction add 👍 join       ← react with 👍 on any message → execute "join"
-reaction add 👋 left       ← react with 👋 → execute "left"
-reaction add 👌 clear txt  ← react with 👌 → clear text messages
-reaction add 🔥 whois      ← react with 🔥 → show sender info
-
-# Then react with the configured emoji on any message where reactions are enabled!
-```
-
-Reacted-to commands run through a direct-invocation bridge (`modules/_infra/bridge.py`,
-`MockEvent`) rather than a real round-trip message — currently wired up for
-`clear`, `join`/`left`, `info`, and `whois`.
-
-### Clearer (`clear`)
-
-Works in **any chat**. Does not pre-check admin rights — it attempts every
-deletion and reports successes/failures/skips from the actual API result,
-which the module's own comments note is simpler and more accurate than
-guessing permissions up front.
-
-| Command | Description |
-| --- | --- |
-| `clear` | Delete text + link messages (default) |
-| `clear all` | Delete all messages (including stickers, voice, etc.) |
-| `clear media` | Delete real media only (pic + vid + file, **no links**) |
-| `clear pic` | Photos only |
-| `clear vid` | Videos / GIFs only |
-| `clear file` | File attachments only |
-| `clear txt` | Text-only messages (no links) |
-| `clear link` | Messages with WebPage previews or URL entities |
-| `clear self` | Your own messages |
-| `clear bot` | Bot-sent messages |
-
-**Combining filters:**
-- `clear txt self` → only your text messages
-- `clear media bot` → only bot's real media
-- `clear all self` → all of your messages
-- `clear txt link pic` → text, link, **and** photo messages together (multiple
-  type keywords combine; fixed in `3.0.1` — they previously overwrote each
-  other so only the last one took effect)
-
-**Strict validation:** Invalid arguments (e.g. `clear fvjnfvo`) are silently
-ignored to prevent false positives.
-
-### Auto-Clearer (`autoclear`)
-
-Automatically delete bot messages based on type and scope.
-
-| Command | Description |
-| --- | --- |
-| `autoclear <type> <on/off> <1/2/3>` | Enable/disable auto-clear |
-| `autoclear status` | Show current settings (Saved Messages only) |
-
-**Types:** `pic`, `txt`, `vid`, `file`, `link`, `other`, `media` (pic+vid+file)
-
-`other` covers stickers, voice messages, polls, contacts, locations and
-audio files — it is **off by default**, so enable it explicitly with
-`autoclear other on 1` if you want those cleared too.
-
-**Scopes:**
-- `1` → bot messages only
-- `2` → your messages only
-- `3` → both
-
-**Context:**
-- In **Saved Messages** → global setting (all bots)
-- In a **bot chat** → bot-specific setting
-
-### Auto-Forwarder (`autofor`)
-
-Automatically forward bot messages back to the same bot.
-
-| Command | Description |
-| --- | --- |
-| `autofor <type> <on/off>` | Enable/disable auto-forward |
-| `forward status` | Show current settings (Saved Messages only) |
-
-**Types:** `txt`, `pic`, `vid`, `file`, `caption`, `all`
-
-### Join / Left
-
-| Command | Description |
-| --- | --- |
-| `join` (reply) | Join all chats found in the replied message |
-| `left` (reply) | Leave all chats found in the replied message |
-| `join delay <sec>` | Fixed delay between joins (`0` restores smart throttling) |
-| `join mode fast\|safe\|human` | Anti-FloodWait aggressiveness (see module help for the 4-layer strategy) |
-| `folder` | Create / reset the `joined*` folders — `joined`, `joined2`, … (Saved Messages only) |
-| `list` | List chats in all `joined*` folders (Saved Messages only) |
-| `autoleave <days>` | Auto-leave joined chats after N days |
-| `autoleave off` | Disable auto-leave |
-| `autoleave status` | Show auto-leave status |
-
-#### Folders, archive and `exclude_archived` (v3.2.0)
-
-Every chat joined with `join` is added to a `joined` folder (`joined2`, `joined3`, …
-once a folder reaches Telegram's 100-chat limit), **muted** and **archived**. To keep
-those archived chats out of your *other* folders, the bot sets Telegram's own
-`exclude_archived` flag on them:
-
-- It checks every regular folder that is not a `joined*` folder at the end of each
-  `join` batch, once when the bot starts and every 6 hours (so a folder you create
-  later is covered too), and updates only the folders that lack the flag. Shared
-  folders and the "All chats" entry are skipped — they cannot carry the flag.
-- `joined*` folders keep showing their chats: in Telegram clients a chat that is
-  explicitly included in a folder is shown even when the folder has `exclude_archived`
-  set.
-- The mute matters: Telegram moves an *unmuted* archived chat back to the main list
-  when a new message arrives, a muted one stays archived.
-- If `mute`, the folder add or `archive` fails for a chat, it is logged at WARNING,
-  shown in the `join` summary and retried automatically (end of the batch, then every
-  6 hours).
-- **Visible side effect:** because the flag is set on your own folders too, chats you
-  archived *by hand* no longer appear in folders that filter by chat type (contacts,
-  non-contacts, groups, channels, bots). Folders that list only specific chats are
-  unaffected. Un-archive a chat to see it in those folders again. There is no setting
-  to turn this off.
-- Upgrading from < 3.2.0 needs no action. Old per-chat `exclude_peers` entries are
-  harmless and are left alone; a chat's entry is removed when that chat is left.
-
-### Info & Whois (work in any chat)
-
-| Command | Description |
-| --- | --- |
-| `info` (reply) | Show message / media metadata + classification |
-| `whois` | Info about current chat |
-| `whois @username` | Info about a specific user/channel/group |
-| `whois 123456789` | Info by numeric ID |
-| `whois` (reply) | Info about replied message sender |
-
----
-
-## Hot-Reload System
-
-The bot monitors the module roots with `watchdog`. When a `.py` file that
-belongs to a module is created, modified, or deleted:
-
-1. The old module instance's `teardown()` is called (handlers removed).
-2. The module is re-imported from disk.
-3. A new instance is created (via `create_module(context)`) and `setup()` is called.
-
-This means you can iterate on module code without restarting the bot.
-Syntax errors in a module are caught and logged — the rest of the plugins
-continue running normally.
-
-**Which file belongs to which module** is worked out automatically:
-
-| File you change | Module reloaded |
-| --- | --- |
-| `single/clearer.py` | `clearer` |
-| `single/clearer_info.py` (the help text) | `clearer` |
-| `packages/join_left/handlers.py` | `join_left` |
-| `packages/join_left/info.py` | `join_left` |
-
-The shared infrastructure in `modules/_infra/` is not a plugin and is never
-reloaded as one.
-
-> A reload re-creates the module instance, so any state it holds (settings
-> cache, pending actions) starts fresh — the same behaviour single-file
-> modules have always had.
-
-There is currently no in-chat command to trigger a manual reload — edit the
-file and the watcher picks it up automatically.
-
----
-
-## Extra Modules (`modules_extra/`)
-
-v3.1.0 adds a second, optional plugin directory alongside `modules/`. The
-two are functionally identical — same `Module` base class, same
-`create_module(context)` factory, same hot-reload — with one difference:
-**a module in `modules_extra/` only runs for an account if that account has
-explicitly enabled it.** New extra modules are disabled by default.
-
-This exists for modules you don't want active on every account by
-default — experiments, per-account personal tweaks, anything you'd rather
-opt into deliberately than have silently active after a `git pull`.
-
-### Two forms, one contract
-
-An extra module can be written either way, and both work identically:
-
-```
-modules_extra/single/my_mod.py              ← single file
-modules_extra/single/my_mod_info.py         ← its metadata
-modules_extra/packages/my_mod/__init__.py   ← package
-modules_extra/packages/my_mod/info.py       ← its metadata
-```
-
-The loader discovers either form, and the same `enabled_modules.json`
-entry works for both.
-
-> The **old flat layout** — a file or folder directly in
-> `modules_extra/` — is still discovered, so a plugin written against
-> `3.2.x` keeps working without being moved. The new `single/` and
-> `packages/` roots simply take precedence.
-
-### How it works
-
-- Which modules are enabled is tracked per account in
-  `data/settings/account{N}/enabled_modules.json`:
-  ```json
-  {
-    "enabled": ["bot_link_starter"]
-  }
-  ```
-  Absence from the list means disabled — you don't need to pre-list every
-  available module with `false`.
-- **Disabled modules are never imported.** Not on startup, not on hot-reload,
-  not anywhere — there's no per-message "is this enabled?" check to skip,
-  because a disabled module's code simply never runs. This also means a
-  disabled module is invisible everywhere a loaded module would normally
-  show up: `help`, `.modules`, `.stats`.
-- **Enabling/disabling takes effect immediately, no restart**, via
-  `.extra enable <name>` / `.extra disable <name>` (see
-  [Module Manager](#module-manager-saved-messages-only--v310) above) — these
-  call `setup()` / `teardown()` on the spot, exactly like a hot-reload.
-- You can also edit `enabled_modules.json` directly instead of using the
-  chat commands — the file is watched, and changes are picked up and
-  applied live, the same as editing a module's `.py` file.
-- Enablement is entirely per-account. Account 1 can have a module enabled
-  that account 2 doesn't have at all, with no shared state between them.
-
-### Trying it out
-
-The repo ships with one extra module, `modules_extra/packages/bot_link_starter/`,
-disabled by default (see [its section](#bot_link_starter--start-the-bot-links-in-a-quote--reply)
-below for what it does). It is enough to verify the whole system end-to-end
-on a real account:
-
-```
-.extra                              →  shows bot_link_starter as ❌ disabled
-help bot_link_starter               →  "غیرفعال است. برای فعال‌سازی: .extra enable bot_link_starter"
-.extra enable bot_link_starter      →  ✅ enabled
-help                                →  bot_link_starter now appears
-.extra disable bot_link_starter     →  ✅ disabled
-```
-
-Writing a new extra module is identical to
-[writing a core one](#writing-a-new-module) below — just save it under
-`modules_extra/` instead of `modules/`, and remember it won't do anything
-until you `.extra enable` it.
-
-### `bot_link_starter` — start the bot links in a Quote & Reply
-
-Ships **disabled** too. It finds the Telegram bot links inside the
-**quoted part** of a message and starts each bot in turn, so the files or
-media those links offer get delivered.
-
-How to use it:
-
-1. Open a message that contains one or more bot links.
-2. Select the part with the links and choose **Quote & Reply**.
-3. Send `start`.
-
-```
-saved message:  "here: https://t.me/MyBot?start=ref123 and https://t.me/OtherBot?start=abc"
-     └─ quote this part ─┘
-then send:      start
-```
-
-The module then sends, in order and three seconds apart:
-
-```
-/start ref123   →  @MyBot
-/start abc      →  @OtherBot
-```
-
-and writes the result back on the `start` message.
-
-What it recognises:
-
-| Form | Example |
-| --- | --- |
-| A plain link | `https://t.me/MyBot?start=ref123` |
-| A link behind text (Telegram's "create link") | text that opens the bot when clicked |
-| A link without a scheme | `t.me/MyBot?start=ref123` |
-| Telegram's in-app scheme | `tg://resolve?domain=MyBot&start=ref123` |
-| `?start=` in any case | `t.me/MyBot?Start=ref123` |
-
-What it deliberately ignores: invite links (`t.me/joinchat/…`, `t.me/+…`),
-channel post links (`t.me/channel/123`), private channel links
-(`t.me/c/…`) and non-Telegram links — `/start` means nothing to any of
-them. A bare `t.me/name` is resolved first: if it turns out to be a
-**channel** rather than a bot, it is refused, so the module can never
-post `/start` into a channel.
-
-The command does not have to be sent in the same chat as the message it
-quotes. Replying in Saved Messages to a post forwarded from a channel
-works: the reply header names the channel, and the module reads the
-message from there.
-
-Only the **quoted** part is read; the rest of the message is never looked
-at. The one exception is a quote that carries no text at all — replying
-with the quote gesture over a whole message sends `quote=True` with no
-`quote_text`. There is nothing to read in that case, so the full message
-being replied to is used instead, and the summary says which source was
-used. A quote that *does* carry text is never widened behind your back.
-
-Every link is started separately, **including several links to the same
-bot**. The `?start=` value is what identifies the item — a file-hosting
-bot returns a different file for each payload — so `Bot?start=111` and
-`Bot?start=222` are two different requests. Only an exact repeat of the
-same bot and the same payload is collapsed.
-
-A bot that cannot be resolved, is rate-limited, or never answers is
-reported in the summary, and the remaining links still go through. The
-three outcomes are reported separately, because "the bot said nothing"
-and "we could not send" mean very different things:
-
-| Outcome | Meaning |
-| --- | --- |
-| ✅ answered | the bot replied |
-| ⚠️ silent | the `/start` was delivered, no reply within the timeout |
-| ❌ failed | the start could not be delivered (unresolvable, flood wait) |
-
-Enable it with:
-
-```
-.extra enable bot_link_starter
-```
-
----
-
-## Writing a New Module
-
-A module can be **one file** or **a package**. Pick the file form while
-the module is small; switch to the package form when it grows past a
-few hundred lines.
-
-### Form 1 — a single file
-
-1. Create `userbot_own/modules/single/my_module.py` and
-   `userbot_own/modules/single/my_module_info.py`.
-   (For an *extra* module, use `userbot_own/modules_extra/single/`
-   instead — the layout is identical.)
-2. Put the **metadata** (help texts, category, description) in the info
-   file — data only, no imports:
-
-```python
-# my_module_info.py
-name = "my_module"
-
-category = "general"          # cleaning | forward | info | social | reaction | system | general
-desc = "توضیح کوتاه ماژول من"
-
-help_text = (
-    "• `mycommand` — does something cool\n"
-)
-
-help_extra = (
-    "🎯 **My Module - Extended Info:**\n\n"
-    "**Commands:**\n"
-    "• `mycommand` — detailed description\n\n"
-    "**Notes:**\n"
-    "• Important edge case 1\n"
-)
-```
-
-3. Put the **behaviour** in the module file — it imports the metadata and
-   copies it onto the class:
-
-```python
-# my_module.py
-from telethon import TelegramClient, events
-
-from userbot_own.core.context import ModuleContext
-from userbot_own.modules._infra.base import Module
-from userbot_own.modules.single.my_module_info import (
-    category, desc, help_extra, help_text, name,
-)
-
-
-class MyModule(Module):
-    def setup(self, client: TelegramClient) -> None:
-        self._add_handler(client, events.NewMessage(outgoing=True), self._on_msg)
-
-    async def _on_msg(self, event) -> None:
-        if (event.raw_text or "").strip().lower() != "mycommand":
-            return
-        await event.edit("Hello from my_module!")
-
-
-# The metadata must be class attributes — help_handler.py reads them off
-# the instance.
-MyModule.name = name
-MyModule.category = category
-MyModule.desc = desc
-MyModule.help_text = help_text
-MyModule.help_extra = help_extra
-
-
-def create_module(context: ModuleContext) -> Module:
-    return MyModule(context)
-```
-
-### Form 2 — a package
-
-For a bigger module, make it a folder — `userbot_own/modules/packages/my_module/`
-(or `userbot_own/modules_extra/packages/my_module/` for an extra module):
-
-```
-my_module/
-├── __init__.py    ← create_module() + the module's public API
-├── info.py        ← the metadata (same fields as above)
-├── const.py       ← tunable numbers
-├── handlers.py    ← the Module subclass
-└── …              ← any other files you need
-```
-
-`__init__.py` does the same job as the tail of a single-file module: it
-imports the class and the metadata, copies the metadata onto the class, and
-exports `create_module(context)`.
-
-The files inside a package are yours to organise. A useful split is
-`const.py` (numbers), `info.py` (metadata), `handlers.py` (the class),
-and one file per concern for the rest — e.g. `join_left/` has
-`entities.py`, `folders.py`, `post_join.py` and `leave.py` for the four
-things it does.
-
-### Both forms
-
-4. The module is picked up automatically (hot-reload) — it loads and its
-   commands work immediately, no restart needed, and it's automatically
-   visible in `help` / `help <module>`. Help visibility is derived from
-   the module's own metadata, not from any separate list to remember to
-   update.
-
-5. `name` must match the file/folder name — the loader registers the
-   module under that name and warns if the two disagree.
-
-### Key Module Attributes
-
-| Attribute | Required | Description |
-| --- | --- | --- |
-| `name` | ✅ | Short identifier (used in logs, and as the key the loader tracks this module under) |
-| `help_text` | ✅ | Compact help shown in `help` (2-5 lines) |
-| `help_extra` | ❌ | Extended help shown via `help <module_name>` |
-| `category` | ❌ | Which group this module appears under in the compact `help` output — one of `cleaning`, `forward`, `info`, `social`, `reaction`, `system`, `general` (see `modules/single/help_handler.py`'s `CATEGORIES` list). Defaults to `"general"` if omitted. |
-| `desc` | ❌ | Short one-line description shown next to the module's name in the compact `help` listing. Defaults to `""` if omitted. |
-
-There is no admin/permission attribute — every account is equal, and every
-module is visible and usable from every account.
-
-`category` and `desc` determine where and how your module shows up in the
-`help` output — set `category` to whichever group in the table above best
-matches what your module does. If you leave it unset, the module still
-loads and works normally, but shows up under the generic "عمومی" ("general")
-group in `help`, and a warning is logged so the omission doesn't go
-unnoticed (`3.0.13`).
-
-### What `context` gives you
-
-`create_module(context: ModuleContext)` receives:
-
-| Field | Type | Notes |
-| --- | --- | --- |
-| `context.cfg` | `AccountConfig` | Also available as `self.cfg` after `super().__init__(context)` |
-| `context.settings` | `Settings` | `backoff_start/max`, `history_limit`, `log_level` |
-| `context.loader_registry` | `AccountLoaderRegistry` | Cross-account — every running account's loader |
-| `context.account_registry` | `AccountRegistry` | Every configured account (live — reflects add/remove) |
-
-Most modules only ever touch `self.cfg`. The cross-account fields exist for
-the handful of modules that genuinely need them (`system.py`'s `.stats`,
-`help_handler.py`, `reaction_commands.py`'s direct-invocation bridge).
-
-### Recommended methods to use
-
-| Method | Purpose |
-| --- | --- |
-| `self._add_handler(client, builder, callback)` | Register event handler (dedup-safe) |
-| `self._safe_edit(message, text)` | Edit message with error handling |
-| `self._get_me_id(client)` | Cached self ID lookup |
-| `self._is_saved_messages(event)` | True if `event` was sent in this account's own Saved Messages |
-| `self._safe_edit_with_auto_delete(event, text, delay=None)` | Edit, then auto-delete after `delay` (falls back to `self._auto_delete_default_delay`, override per-subclass) |
-| `self._track_delete_task(message, delay=None)` | Schedule an auto-delete without editing first; tracked so `teardown()` cancels it on hot-reload |
-| `self._log_info/warning/error/debug(msg)` | Structured per-account logging |
-
-If your module persists its own settings to a JSON file, use
-`userbot_own.helpers.utils.read_json_file(path)` /
-`write_json_file_atomic(path, data)` instead of hand-rolling file I/O —
-they return `(data, error)` / `error` pairs rather than raising, and the
-write is atomic (temp file + rename), so a crash mid-write can never
-leave a truncated settings file. See `auto_clearer.py`, `auto_forwarder.py`,
-`join_left.py`, or `reaction_commands.py` for examples.
-
-For a multi-command module, `userbot_own.modules.router.CommandRouter` gives you
-declarative first-token dispatch instead of a hand-rolled `if/elif` chain —
-see `system.py` for a small example.
-
-### `help_text` / `help_extra` formatting conventions
-
-These aren't enforced by code, but every existing module follows the same
-shape — match it so `help` output stays visually consistent:
-
-- **`help_text`** (shown in the compact `help` listing): 2–5 lines. One
-  bullet (`• `) per command, each in the form
-  `` • `command syntax` | کوتاه‌ترین توضیح ممکن\n ``. Wrap every literal
-  command the user would type in backticks so it copy-pastes cleanly.
-- **`help_extra`** (shown via `help <module_name>`): no strict length
-  limit, but organize it under a handful of short bolded-by-convention
-  section headers (see any existing module for the pattern) — typically
-  "دستورات اصلی", "مثال‌ها", and "نکات مهم" at minimum. Keep each bullet to
-  one line where possible.
-- Persian text is RTL; keep backticked command syntax (which is LTR) short
-  and self-contained per line so it doesn't visually break the surrounding
-  RTL flow.
-
----
-
-## Versioning Guide
-
-This project follows [Semantic Versioning](https://semver.org/) (`MAJOR.MINOR.PATCH`).
-
-| Part | When to bump |
-| --- | --- |
-| **MAJOR** | Breaking architectural change or full rewrite |
-| **MINOR** | New module, feature, or meaningful enhancement |
-| **PATCH** | Bug fix, refactor, doc update, or minor improvement |
-
-### After every change
-
-1. Update `VERSION` (project root) — the single source of truth
-2. Also bump the three hand-maintained copies of it, in the same commit (each has
-   drifted before — `pyproject.toml` was still `3.1.0` at v3.1.9):
-   - `_FALLBACK_VERSION` in `userbot_own/__init__.py` (used only if `VERSION` can't be read)
-   - `version` in `pyproject.toml`
-   - the **Current version** line at the top of this README
-3. Prepend a new entry to `CHANGELOG.md`
-
-### Version rule for AI-assisted changes
-
-Every time an AI assistant applies a change, it must:
-
-- Increment the version (PATCH for fixes, MINOR for features)
-- Update `VERSION` and `CHANGELOG.md`
-- State explicitly: **"Change applied. New version: X.Y.Z"**
-
----
-
-## FAQ
-
-**Q: Can I run this on Windows?**
-
-A: Yes. Replace `source .venv/bin/activate` with `.venv\Scripts\activate`.
-
----
-
-**Q: Does this support proxies?**
-
-A: Yes, as of v3.2.7 — one system-wide setting (direct / SOCKS5 / Cloudflare),
-managed from the Settings menu (run.bat option [3] on Windows,
-`userbot settings` on Termux/Linux; every menu option is a single
-keypress). See [Connection modes](#connection-modes-v327). Direct remains
-the default, and the bot falls back to it whenever `data/connection.json`
-is missing or invalid.
-
----
-
-**Q: Where are the log files?**
-
-A: `userbot_own/data/logs/main.log` and per-account `account1.log`, `account2.log`, etc.
-
----
-
-**Q: How do reaction commands work?**
-
-A: `reaction_commands.py` registers two push-based Telethon event handlers
-— `UpdateMessageReactions` and `UpdateEditMessage` (Telegram sometimes sends
-the latter instead of the former). There is no polling of any kind. When
-your own reaction matches a configured emoji, the module invokes the target
-command's handler directly via a small adapter (`MockEvent`, in
-`modules/_infra/bridge.py`) rather than sending a real message — faster and avoids
-a round trip through the event loop.
-
-*(`3.0.2` note: the `UpdateMessageReactions` path was silently non-functional
-before this version — it read two attributes that don't exist on that
-update type, so it always did nothing, and every reaction command was
-actually running through `UpdateEditMessage` alone. Fixed; both paths are
-genuinely redundant now, which should mean faster and more reliable
-detection.)*
-
----
-
-**Q: I reacted again (or changed my reaction) on a message I already used — why didn't it re-trigger, before `3.0.2`?**
-
-A: Before `3.0.2`, once an emoji had triggered its command on a given
-message, that exact (message, emoji) combination was blocked from ever
-triggering again, permanently, for the life of the running process — even
-if you removed the reaction and added it back later. Fixed in `3.0.2`: the
-module now tracks your *current* reaction state per message instead of a
-permanent history, so removing a reaction and reacting again (with the same
-or a different emoji) correctly re-triggers. Telegram re-delivering the
-same still-active reaction (e.g. because both push routes above fired for
-one underlying change) still correctly does *not* double-execute.
-
----
-
-**Q: Can I use reaction commands on bot messages?**
-
-A: Yes, bot chats are enabled by default, via the same two push-based
-handlers above — not a separate mechanism. The active scope set is
-configured at runtime with `.reaction_scope` (e.g. `.reaction_scope group`
-to also enable groups); the old `ENABLE_FOR_*` class attributes were
-removed in `3.0.8`.
-
----
-
-**Q: What's the difference between `clear txt` and `clear link`?**
-
-A: `clear txt` deletes only plain text messages (no media, no links).
-`clear link` deletes messages with WebPage previews or URL entities.
-A message containing a download link like `https://github.com/file.exe`
-is classified as `link`, not `txt`.
-
----
-
-**Q: Why does `clear media` not delete link messages?**
-
-A: `media` refers to **real attachments** only (photos, videos, files).
-WebPage previews are metadata, not media. Use `clear link` or `clear all`
-for link messages.
-
----
-
-**Q: What happened to the AI modules?**
-
-A: `ai_assistant.py` and `ai_bot.py` were removed in version `1.0.0`.
-See `CHANGELOG.md` for the full rationale.
-
----
-
-**Q: What happened to the admin/permission system?**
-
-A: Removed — see `CHANGELOG.md` for the version where `is_admin`,
-`is_admin_only`, and related permission checks were stripped from
-`config.py`, `modules/_infra/base.py`, `system.py`, `help_handler.py`, and the
-plugin loader. This is now a single-owner tool: every configured account is
-equal, and every command is available from every account.
-
----
-
-**Q: What happened to the EventBus and the plugin registry?**
-
-A: Both removed in `3.0.11`. `EventBus` only ever carried one event
-(`ConnectionStateChanged`, published by `AccountReconnector`), and a
-full-repo audit confirmed zero subscribers anywhere — not just in this
-version, but in the original pre-refactor callback-list mechanism it
-replaced either. `AccountReconnector` now logs connection-state
-transitions directly instead. `PluginMetadataStore` was written to on
-every module load/reload/unload but had no reader anywhere; it had been
-kept despite that specifically because this table used to advertise it as
-a feature, which is why that row is gone too. Both are straightforward to
-reintroduce later, purpose-built, if a real feature ends up needing them —
-see `CHANGELOG.md`'s `3.0.11` entry for the full reasoning.
-
----
-
-**Q: What is "fast reconnect" (v3.1.1), and does it need anything special on Android?**
-
-A: Before `3.1.1`, both halves of reconnection were pure polling: a dropped
-connection could go unnoticed for up to 30 seconds, and once the bot
-started backing off after a real outage it could wait up to 300 seconds
-before even checking whether the network had come back — even if it came
-back 1 second into that wait. `3.1.1` fixes both halves:
-
-- **Drops are now detected instantly.** A background task awaits
-  Telethon's own `client.disconnected` signal (which resolves the moment
-  the socket dies — genuinely event-driven, not a poll) instead of
-  waiting for the next scheduled health check.
-- **Restoration is now detected within a few seconds**, not minutes. While
-  backing off after a real outage, a lightweight probe (a raw TCP connect
-  to a Telegram data center — **never** a Telegram API call, so it carries
-  no FloodWait risk) checks every few seconds and wakes the bot up the
-  instant connectivity returns, instead of sleeping out the full backoff.
-
-This is on by default and tunable via environment variables in your `.env`:
-
-| Variable                          | Default | Description                                     |
-|------------------------------------|---------|--------------------------------------------------|
-| `FAST_RECONNECT_ENABLED`           | `true`  | Master switch — set `false` to restore the plain pre-3.1.1 polling behavior |
-| `FAST_RECONNECT_HEALTHY_INTERVAL`  | `30`    | Seconds between health checks when connected      |
-| `FAST_RECONNECT_PROBE_INTERVAL`    | `3`     | Seconds between connectivity probes while backing off from an outage |
-
-**On Termux/Android specifically:** none of this can run at all while
-Android has suspended the Termux process — no code change can override
-that. If you're running the bot in the background on a phone, run
-`termux-wake-lock` (part of `termux-api`) to prevent Android's Doze mode
-from suspending Termux; without it, both the pre-3.1.1 polling and the new
-fast-reconnect behavior are equally unable to run until you bring Termux
-back to the foreground. Fast reconnect makes the bot respond faster once
-it *is* allowed to run — it doesn't change whether Android lets it run in
-the background at all.
-
----
-
-**Q: Is there an in-chat way to add or remove accounts?**
-
-A: No. An earlier version of this codebase (`account_management/flows.py`,
-`AccountFlowManager`) implemented a full interactive in-chat add/remove
-flow, but it was never wired to any command — nothing ever called
-`start_add_flow()` / `start_remove_flow()`, so `.addaccount`,
-`.removeaccount <n>`, and `.cancelflow` never actually worked as live
-commands. Since it was confirmed unreachable and unused, it was removed
-entirely in version `3.0.1` rather than kept as dormant code.
-`python add_account.py` (interactive CLI) is the supported way to add or
-remove accounts.
-
----
-
-**Q: How do I write a custom module?**
-
-A: See [Writing a New Module](#writing-a-new-module). The minimum
-requirement is a class inheriting from `Module` with a `name`, `help_text`,
-and a `create_module(context)` factory function.

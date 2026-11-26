@@ -57,3 +57,10 @@ desktop.ini
 update_github.bat
 userbot_own.zip
 userbot_own_v*.zip
+userbot_own_*.zip
+
+# ===============================
+# پوشه‌های موقت و بک‌آپ
+# ===============================
+extras/
+backups/

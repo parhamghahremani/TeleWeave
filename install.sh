@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# install.sh — Safe installer / updater for userbot_own.
+# install.sh — Safe installer / updater for TeleWeave/Userbot.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/parhamghahremani/userbot_own/main/install.sh | bash
@@ -17,7 +17,7 @@ set -Eeuo pipefail
 REPO_URL="https://github.com/parhamghahremani/userbot_own.git"
 REPO_NAME="userbot_own"
 INSTALL_DIR="${HOME}/${REPO_NAME}"
-LAUNCHER_NAME="userbot"
+LAUNCHER_NAME="teleweave"
 
 if [[ -n "${PREFIX:-}" && "$PREFIX" == *"com.termux"* ]] && command -v pkg >/dev/null 2>&1; then
   IS_TERMUX=true
@@ -53,8 +53,7 @@ trap on_error ERR
 # User-owned data can exist in either of the layouts supported by the launcher.
 PROTECTED_PATHS=(
   "accounts" ".env" "data"
-  "userbot/accounts" "userbot/.env" "userbot/data"
-  "userbot_own/accounts" "userbot_own/.env" "userbot_own/data"
+  "Userbot/accounts" "Userbot/.env" "Userbot/data"
 )
 
 path_exists() {
@@ -327,13 +326,13 @@ if [[ -f "${INSTALL_DIR}/main.py" ]]; then
   ADD_ACCOUNT_PY="${INSTALL_DIR}/add_account.py"
   SETTINGS_PY="${INSTALL_DIR}/settings.py"
   RUN_DIR="$INSTALL_DIR"
-elif [[ -f "${INSTALL_DIR}/userbot/main.py" ]]; then
-  MAIN_PY="${INSTALL_DIR}/userbot/main.py"
-  ADD_ACCOUNT_PY="${INSTALL_DIR}/userbot/add_account.py"
-  SETTINGS_PY="${INSTALL_DIR}/userbot/settings.py"
-  RUN_DIR="${INSTALL_DIR}/userbot"
+elif [[ -f "${INSTALL_DIR}/Userbot/main.py" ]]; then
+  MAIN_PY="${INSTALL_DIR}/Userbot/main.py"
+  ADD_ACCOUNT_PY="${INSTALL_DIR}/Userbot/add_account.py"
+  SETTINGS_PY="${INSTALL_DIR}/Userbot/settings.py"
+  RUN_DIR="${INSTALL_DIR}/Userbot"
 else
-  die "Could not find main.py in the repository root or userbot/ directory."
+  die "Could not find main.py in the repository root or Userbot/ directory."
 fi
 
 CODE_ROOT="$RUN_DIR"
@@ -373,7 +372,7 @@ else
   R=""; B=""; G=""; Y=""; E=""; C=""
 fi
 
-log()  { printf '%b[userbot]%b %s\n' "$C" "$R" "$1"; }
+log()  { printf '%b[teleweave]%b %s\n' "$C" "$R" "$1"; }
 ok()   { printf '%b[ OK ]%b %s\n' "$G" "$R" "$1"; }
 warn() { printf '%b[WARN]%b %s\n' "$Y" "$R" "$1" >&2; }
 die()  { printf '%b[FAIL]%b %s\n' "$E" "$R" "$1" >&2; return 1; }
@@ -393,10 +392,10 @@ pause() {
 }
 
 print_help() {
-  printf '%buserbot_own v%s — Command Reference%b\n\n' "$B" "$(current_version)" "$R"
+  printf '%bTeleWeave/Userbot v%s — Command Reference%b\n\n' "$B" "$(current_version)" "$R"
   cat <<'HELP_TEXT'
 Usage:
-  userbot [command] [args...]
+  teleweave [command] [args...]
 
 Commands:
   run                         Start the userbot
@@ -416,9 +415,9 @@ Connection settings subcommands:
   test
 
 Interactive menus:
-  userbot                     Main menu
-  userbot settings            Connection settings menu
-  userbot add                 Account management menu
+  teleweave                   Main menu
+  teleweave settings          Connection settings menu
+  teleweave add               Account management menu
 
 Notes:
   - Update uses update.sh; Git sync is fast-forward-only.
@@ -513,12 +512,12 @@ settings_menu() {
 main_menu() {
   local choice
   if [[ ! -t 0 ]]; then
-    die "The interactive menu requires a terminal. Use: userbot help"
+    die "The interactive menu requires a terminal. Use: teleweave help"
     return 1
   fi
 
   while true; do
-    printf '\n%b=== userbot_own — v%s ===%b\n' "$B" "$(current_version)" "$R"
+    printf '\n%b=== TeleWeave/Userbot — v%s ===%b\n' "$B" "$(current_version)" "$R"
     printf '1) Run bot\n'
     printf '2) Manage accounts\n'
     printf '3) Connection settings\n'
@@ -564,7 +563,7 @@ case "${1:-}" in
     exec bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/parhamghahremani/userbot_own/main/install.sh | bash'
     ;;
   version|--version)
-    printf 'userbot_own version %s\n' "$(current_version)"
+    printf 'TeleWeave/Userbot version %s\n' "$(current_version)"
     ;;
   help|--help|-h)
     print_help
@@ -573,7 +572,7 @@ case "${1:-}" in
     main_menu
     ;;
   *)
-    printf 'Usage: userbot [run|add|settings [command]|update|reinstall|version|help]\n' >&2
+    printf 'Usage: teleweave [run|add|settings [command]|update|reinstall|version|help]\n' >&2
     exit 2
     ;;
 esac

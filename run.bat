@@ -3,9 +3,9 @@ setlocal EnableExtensions
 chcp 65001 >nul
 
 rem ────────────────────────────────────────────────────────────────
-rem  Interactive launcher menu for the userbot project.
+rem  Interactive launcher menu for the TeleWeave/Userbot project.
 rem  - Option 1  -> python main.py                  (run the bot)
-rem  - Option 2  -> python -m userbot_own.account_management.cli  (account management)
+rem  - Option 2  -> python -m Userbot.account_management.cli  (account management)
 rem  - Option 3  -> connection settings sub-menu (show / change
 rem                 mode / test); every action returns to that
 rem                 sub-menu, [7] Back returns to the main menu
@@ -33,7 +33,7 @@ rem Current version, read from the VERSION file — every future
 rem release updates this display automatically, nothing to edit here.
 set "APP_VERSION=unknown"
 if exist VERSION set /p APP_VERSION=<VERSION
-title Userbot Control Menu v%APP_VERSION%
+title TeleWeave/Userbot Control Menu v%APP_VERSION%
 
 rem Sanity check: make sure Python is available before showing the menu.
 where python >nul 2>nul
@@ -66,7 +66,7 @@ exit /b 0
 :menu
 cls
 echo  ==============================================================
-echo           USERBOT  -  CONTROL  MENU  (v%APP_VERSION%)
+echo           TELEWEAVE/USERBOT  -  CONTROL  MENU  (v%APP_VERSION%)
 echo  ==============================================================
 echo.
 echo    [1] Run the bot
@@ -100,7 +100,7 @@ goto :menu
 echo.
 echo  ── Starting account manager ... press Ctrl+C to stop ──
 echo.
-cmd /c python -m userbot_own.account_management.cli
+cmd /c python -m Userbot.account_management.cli
 pause
 goto :menu
 
@@ -181,14 +181,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubus
 goto :menu
 
 :version
-echo userbot_own version %APP_VERSION%
+echo TeleWeave/Userbot version %APP_VERSION%
 pause
 goto :menu
 
 :help
 cls
 echo  ==============================================================
-echo           USERBOT  -  COMMAND REFERENCE  (v%APP_VERSION%)
+echo           TELEWEAVE/USERBOT  -  COMMAND REFERENCE  (v%APP_VERSION%)
 echo  ==============================================================
 echo.
 echo  Usage: run.bat [command] [args...]
@@ -201,7 +201,7 @@ echo    reinstall              Full reinstall
 echo    version                Show version
 echo    help                   Show this help message
 echo.
-echo  Settings subcommands (also work as: run.bat settings ^<cmd^>):
+echo  Settings subcommands (also work as: run.bat ^<cmd^>):
 echo    show                   Print current connection settings
 echo    set-direct             Switch to direct connection (no proxy)
 echo    set-socks5 [host port [user] [pass]]
