@@ -30,6 +30,15 @@ jobs:
           test -d "Userbot" && echo "✓ Userbot/ directory exists (PascalCase)"
           test ! -d "userbot_own" && echo "✓ userbot_own/ directory does not exist"
           test ! -d "userbot" && echo "✓ userbot/ lowercase directory does not exist"
+      - name: Verify legacy package removed
+        run: |
+          if [ -d "userbot_own" ]; then
+            echo "✗ Legacy userbot_own/ directory still exists!"
+            ls -la userbot_own/
+            exit 1
+          else
+            echo "✓ Legacy userbot_own/ directory removed"
+          fi
 
       - name: Install dependencies
         run: |
