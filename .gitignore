@@ -64,3 +64,20 @@ userbot_own_*.zip
 # ===============================
 extras/
 backups/
+
+# ===============================
+# Cloudflare Wrangler cache
+# ===============================
+.wrangler/
+
+# ===============================
+# Userbot package runtime paths
+# ===============================
+Userbot/accounts/
+Userbot/data/
+Userbot/.env*
+
+# ===============================
+# Local build artifacts
+# ===============================
+teleweave.egg-info/
