@@ -2,7 +2,7 @@
 """
 settings.py  (repository root)
 ════════════════════════════════════════════════════════════════
-Thin launcher — delegates to userbot_own.settings_menu.cli.main().
+Thin launcher — delegates to Userbot.settings_menu.cli.main().
 Supports: show, set-direct, set-socks5, set-cf-no-worker, set-cf-worker, test, help
 ...
 """
@@ -10,7 +10,7 @@ import sys
 
 sys.dont_write_bytecode = True  # Prevent __pycache__ folders
 
-from userbot_own.settings_menu.cli import main
+from Userbot.settings_menu.cli import main
 
 if __name__ == "__main__":
     # Handle help at launcher level for consistency with run.bat

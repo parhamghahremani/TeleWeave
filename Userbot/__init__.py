@@ -1,0 +1,61 @@
+"""
+userbot
+════════════════════════════════════════════════════════════════
+Multi-Account Telegram Userbot
+
+A professional, async, hot-reload-capable Telegram account management
+system built with Python 3.11+ and Telethon.
+
+Version is read from the VERSION file at the repository root.
+
+NOTE: this is the single place `__version__` is computed. The original
+project also re-implemented a near-identical version reader inside
+core/client.py, with a *different* (and by the time of this refactor,
+stale) fallback constant. That duplication has been removed — every
+other module that needs the version now imports `__version__` from
+here instead of re-reading the file itself.
+════════════════════════════════════════════════════════════════
+"""
+from pathlib import Path
+
+_version_file = Path(__file__).parent.parent / "VERSION"
+
+# Fallback used only if VERSION cannot be read at all (missing, unreadable,
+# or empty). Kept in sync with the actual VERSION file content so a
+# missing/corrupted VERSION file doesn't silently report a stale,
+# multiple-versions-old number.
+#
+# v3.1.9: this had drifted to "3.1.4" — three releases stale relative to
+# the actual VERSION file (3.1.8) at the time of this fix, despite the
+# comment above explicitly saying it's kept in sync. Corrected as part of
+# this version bump; nothing else about the fallback mechanism changed.
+#
+# v3.1.10: bumped to "3.1.10" in the same change as VERSION. This constant,
+# README.md's "Current version" line, and pyproject.toml's `version` are the
+# three hand-maintained copies of VERSION — every one of them had drifted at
+# some point (pyproject.toml was still "3.1.0"). README's "Version rule"
+# section now lists all of them so a bump cannot silently skip one again.
+#
+# v3.2.0: bumped to "3.2.0" in the same change as VERSION (and pyproject.toml, and
+# README.md's "Current version" line — see README "Versioning Guide").
+# v3.2.1: same four hand-maintained copies bumped together again.
+# v3.2.2: same four hand-maintained copies bumped together again.
+# v3.2.3: same four hand-maintained copies bumped together again.
+# v3.2.4: same four hand-maintained copies bumped together again.
+# v3.2.5: same four hand-maintained copies bumped together again.
+# v3.2.6: same four hand-maintained copies bumped together again.
+# v3.2.7: same four hand-maintained copies bumped together again. This version
+# stays pinned at 3.2.7 until the whole CF-proxy plan is implemented and
+# verified (per the owner's instruction) — every fix lands inside it.
+_FALLBACK_VERSION = "3.2.13"
+
+try:
+    __version__ = _version_file.read_text(encoding="utf-8").strip() or _FALLBACK_VERSION
+except OSError:
+    # Catches FileNotFoundError, PermissionError, and any other I/O failure
+    # reading VERSION — not just the missing-file case. A narrower except
+    # clause here would let an unreadable-but-present VERSION file crash
+    # the import of the entire userbot package.
+    __version__ = _FALLBACK_VERSION
+
+__all__ = ["__version__"]

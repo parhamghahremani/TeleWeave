@@ -5,6 +5,43 @@ Format follows [Semantic Versioning](https://semver.org): **MAJOR.MINOR.PATCH**
 
 ---
 
+## [3.2.13] — 2026-11-27
+
+**Source:** AI + project owner — Complete architecture migration from `userbot_own` to `TeleWeave/Userbot` v3.2.13. Package rename, distribution name, CLI command, and all documentation updated.
+
+### Changed
+
+- **Package directory renamed:** `userbot_own/` → `Userbot/` (PascalCase) — works on case-sensitive Linux/Termux filesystems.
+- **All imports updated:** `userbot_own.*` → `Userbot.*` across 111+ Python files.
+- **Distribution name:** PyPI package is now `teleweave` (was `userbot_own`).
+- **CLI command:** Global launcher is now `teleweave` (was `userbot`).
+- **Install URL:** All scripts point to `parhamghahremani/userbot_own` (was `pppppuhdtxd/userbot_own` — former account suspended).
+- **GitHub repository:** `parhamghahremani/userbot_own` — user will rename repo to `TeleWeave` when ready.
+
+### Fixed
+
+- **Version consistency across all four hand-maintained copies:**
+  - `VERSION` = `3.2.13`
+  - `pyproject.toml` `version` = `3.2.13`
+  - `Userbot/__init__.py` `_FALLBACK_VERSION` = `3.2.13`
+  - `README.md` "Current version" line = `3.2.13`
+- **Packaging configuration:** `pyproject.toml` uses `include = ["Userbot*"]`, `known-first-party = ["Userbot"]` — wheel builds correctly with only the `Userbot/` package.
+- **Runtime paths verified:** `Paths.from_base()` resolves `accounts/`, `data/`, `settings/` correctly in both development and installed environments.
+
+### Files changed
+
+- `install.sh` — REPO_URL, LAUNCHER_NAME="teleweave", PROTECTED_PATHS updated to Userbot/, menu titles updated
+- `update.sh` — REPO_URL in error messages, PROTECTED_PATHS updated to Userbot/, CODE_ROOT detection for Userbot/
+- `run.bat` — Reinstall URL updated, account management uses `Userbot.account_management.cli`, menu titles updated
+- `README.md` — All references updated to TeleWeave/Userbot, v3.2.13, teleweave CLI, new install URL, Userbot/ package paths
+- `CHANGELOG.md` — This entry added
+- `VERSION` → `3.2.13`
+- `pyproject.toml` → `name = "teleweave"`, `version = "3.2.13"`, `include = ["Userbot*"]`, `known-first-party = ["Userbot"]`
+- `Userbot/__init__.py` — `_FALLBACK_VERSION = "3.2.13"`
+- All Python source files — `userbot_own.*` imports → `Userbot.*`
+
+---
+
 ## [3.2.12] — 2026-11-13
 
 **Source:** AI + project owner — Critical launcher fixes, log noise reduction, Windows reinstall fix, Connection Settings menu unification (4-option), dead code removal, BACKOFF_* cleanup.
