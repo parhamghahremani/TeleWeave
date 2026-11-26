@@ -69,6 +69,7 @@ backups/
 # Cloudflare Wrangler cache
 # ===============================
 .wrangler/
+cloudflare/.wrangler/
 
 # ===============================
 # Userbot package runtime paths
