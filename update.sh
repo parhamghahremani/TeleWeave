@@ -3,7 +3,7 @@
 # update.sh — Safe fast-forward-only updater for TeleWeave/Userbot.
 #
 # Usage:
-#   bash ~/userbot_own/update.sh
+#   bash ~/TeleWeave/update.sh
 #   teleweave update
 #
 # This script never uses git reset --hard. It refuses tracked local changes,

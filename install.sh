@@ -3,7 +3,7 @@
 # install.sh — Safe installer / updater for TeleWeave/Userbot.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/parhamghahremani/userbot_own/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/parhamghahremani/TeleWeave/main/install.sh | bash
 #
 # Existing installations are updated with a fast-forward-only Git merge.
 # Local commits are never discarded, and protected user-data paths are checked
@@ -14,8 +14,8 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-REPO_URL="https://github.com/parhamghahremani/userbot_own.git"
-REPO_NAME="userbot_own"
+REPO_URL="https://github.com/parhamghahremani/TeleWeave.git"
+REPO_NAME="TeleWeave"
 INSTALL_DIR="${HOME}/${REPO_NAME}"
 LAUNCHER_NAME="teleweave"
 
@@ -560,7 +560,7 @@ case "${1:-}" in
     run_update "$@"
     ;;
   reinstall)
-    exec bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/parhamghahremani/userbot_own/main/install.sh | bash'
+    exec bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/parhamghahremani/TeleWeave/main/install.sh | bash'
     ;;
   version|--version)
     printf 'TeleWeave/Userbot version %s\n' "$(current_version)"

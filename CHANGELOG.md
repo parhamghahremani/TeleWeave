@@ -15,8 +15,9 @@ Format follows [Semantic Versioning](https://semver.org): **MAJOR.MINOR.PATCH**
 - **All imports updated:** `userbot_own.*` → `Userbot.*` across 111+ Python files.
 - **Distribution name:** PyPI package is now `teleweave` (was `userbot_own`).
 - **CLI command:** Global launcher is now `teleweave` (was `userbot`).
-- **Install URL:** All scripts point to `parhamghahremani/userbot_own` (was `pppppuhdtxd/userbot_own` — former account suspended).
-- **GitHub repository:** `parhamghahremani/userbot_own` — user will rename repo to `TeleWeave` when ready.
+- **Install URL:** All scripts point to `parhamghahremani/TeleWeave` (was `pppppuhdtxd/userbot_own` — former account suspended).
+- **GitHub repository:** `parhamghahremani/TeleWeave` — renamed from `userbot_own`.
+- **Installation directory:** `~/userbot_own` → `~/TeleWeave` across all scripts and documentation.
 
 ### Fixed
 
@@ -30,15 +31,16 @@ Format follows [Semantic Versioning](https://semver.org): **MAJOR.MINOR.PATCH**
 
 ### Files changed
 
-- `install.sh` — REPO_URL, LAUNCHER_NAME="teleweave", PROTECTED_PATHS updated to Userbot/, menu titles updated
-- `update.sh` — REPO_URL in error messages, PROTECTED_PATHS updated to Userbot/, CODE_ROOT detection for Userbot/
-- `run.bat` — Reinstall URL updated, account management uses `Userbot.account_management.cli`, menu titles updated
-- `README.md` — All references updated to TeleWeave/Userbot, v3.2.13, teleweave CLI, new install URL, Userbot/ package paths
+- `install.sh` — REPO_URL → `parhamghahremani/TeleWeave`, REPO_NAME → `TeleWeave`, INSTALL_DIR → `~/TeleWeave`, reinstall URL updated, PROTECTED_PATHS updated to Userbot/, menu titles updated
+- `update.sh` — Example path reference updated to `~/TeleWeave`, PROTECTED_PATHS updated to Userbot/, CODE_ROOT detection for Userbot/
+- `run.bat` — Reinstall URL updated to `parhamghahremani/TeleWeave`, account management uses `Userbot.account_management.cli`, menu titles updated
+- `README.md` — All references updated to TeleWeave/Userbot, v3.2.13, teleweave CLI, new install URL, Userbot/ package paths, installation directory `~/TeleWeave`
 - `CHANGELOG.md` — This entry added
 - `VERSION` → `3.2.13`
 - `pyproject.toml` → `name = "teleweave"`, `version = "3.2.13"`, `include = ["Userbot*"]`, `known-first-party = ["Userbot"]`
 - `Userbot/__init__.py` — `_FALLBACK_VERSION = "3.2.13"`
 - All Python source files — `userbot_own.*` imports → `Userbot.*`
+- `cloudflare/tg-relay-worker.js` — Version comment updated to v3.2.13
 
 ---
 
