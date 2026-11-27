@@ -177,7 +177,7 @@ goto :settings
 echo.
 echo  ── Full reinstall ... ──
 echo.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/parhamghahremani/userbot_own/main/install.sh | iex"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/parhamghahremani/TeleWeave/main/install.sh | iex"
 goto :menu
 
 :version

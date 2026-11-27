@@ -4,7 +4,7 @@ The fastest way to get running — no manual `venv` setup, no remembering
 paths. Works on **Android (Termux)** and **Debian/Ubuntu-based Linux**.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/parhamghahremani/userbot_own/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/parhamghahremani/TeleWeave/main/install.sh | bash
 ```
 
 This single command will:
@@ -12,7 +12,7 @@ This single command will:
 1. Detect whether you're on Termux or a standard Linux distro.
 2. Install Python (and, on Termux, the native build tools some dependencies
    need to compile) if it isn't already present.
-3. Clone this repository to `~/userbot_own`.
+3. Clone this repository to `~/TeleWeave`.
 4. Create an isolated virtual environment and install everything in
    `requirements.txt` into it.
 5. Register a global `teleweave` command so you can launch things from
@@ -67,7 +67,7 @@ teleweave update   # update directly
 > discard them. As of `3.0.11`, `update.sh` checks for this and refuses to
 > proceed (with a clear message telling you to `git push` first) instead
 > of silently overwriting local work — but the simplest fix is just to
-> push before you update: `git -C ~/userbot_own push origin main`.
+> push before you update: `git -C ~/TeleWeave push origin main`.
 
 If you'd rather install manually (or you're on a distro other than
 Termux/Debian/Ubuntu), see the [Quick Start](#quick-start) section below.
@@ -141,7 +141,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ```bash
 # 1. Clone / extract the project
-cd userbot_own
+cd TeleWeave
 
 # 2. Create a virtual environment
 python3.11 -m venv .venv
@@ -170,7 +170,7 @@ resolved; this version uses proper package imports throughout).
 ## Project Structure
 
 ```
-userbot_own/
+TeleWeave/
 ├── VERSION                        ← single source of truth for version
 ├── CHANGELOG.md                   ← all changes since the beginning
 ├── README.md                      ← this file

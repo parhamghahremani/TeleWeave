@@ -3,7 +3,7 @@
 # install.sh — Safe installer / updater for TeleWeave/Userbot.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/parhamghahremani/userbot_own/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/parhamghahremani/TeleWeave/main/install.sh | bash
 #
 # Existing installations are updated with a fast-forward-only Git merge.
 # Local commits are never discarded, and protected user-data paths are checked
@@ -14,8 +14,8 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-REPO_URL="https://github.com/parhamghahremani/userbot_own.git"
-REPO_NAME="userbot_own"
+REPO_URL="https://github.com/parhamghahremani/TeleWeave.git"
+REPO_NAME="TeleWeave"
 INSTALL_DIR="${HOME}/${REPO_NAME}"
 LAUNCHER_NAME="teleweave"
 
@@ -245,7 +245,91 @@ ok "Python version requirement satisfied."
 
 OLD_VERSION="unknown"
 OLD_SHA="none (fresh install)"
-if [[ -d "${INSTALL_DIR}/.git" ]]; then
+
+# -----------------------------------------------------------------------------
+# Legacy installation detection and migration (~/userbot_own -> ~/TeleWeave)
+# -----------------------------------------------------------------------------
+LEGACY_DIR="${HOME}/userbot_own"
+if [[ -d "${LEGACY_DIR}/.git" ]]; then
+  log "Legacy installation detected at ${LEGACY_DIR}"
+
+  # Identify legacy data locations (package-internal v3.2.9+ and root-level v3.2.7-3.2.8)
+  LEGACY_ACCOUNTS=()
+  LEGACY_DATA=()
+  LEGACY_ENV=()
+
+  # Package-internal layout (v3.2.9+)
+  if [[ -d "${LEGACY_DIR}/userbot_own/accounts" ]]; then
+    LEGACY_ACCOUNTS+=("${LEGACY_DIR}/userbot_own/accounts")
+  fi
+  if [[ -d "${LEGACY_DIR}/userbot_own/data" ]]; then
+    LEGACY_DATA+=("${LEGACY_DIR}/userbot_own/data")
+  fi
+  if [[ -f "${LEGACY_DIR}/userbot_own/.env" ]]; then
+    LEGACY_ENV+=("${LEGACY_DIR}/userbot_own/.env")
+  fi
+
+  # Root-level layout (v3.2.7-3.2.8)
+  if [[ -d "${LEGACY_DIR}/accounts" ]]; then
+    LEGACY_ACCOUNTS+=("${LEGACY_DIR}/accounts")
+  fi
+  if [[ -d "${LEGACY_DIR}/data" ]]; then
+    LEGACY_DATA+=("${LEGACY_DIR}/data")
+  fi
+  if [[ -f "${LEGACY_DIR}/.env" ]]; then
+    LEGACY_ENV+=("${LEGACY_DIR}/.env")
+  fi
+
+  # Check for conflicts with new location
+  if [[ -d "${INSTALL_DIR}" ]]; then
+    warn "Both legacy (${LEGACY_DIR}) and new (${INSTALL_DIR}) installations exist!"
+    for d in "${INSTALL_DIR}/accounts" "${INSTALL_DIR}/Userbot/accounts" "${LEGACY_ACCOUNTS[@]}"; do
+      [[ -d "$d" ]] && log "Found accounts at: $d"
+    done
+    die "Manual intervention required. Please backup and choose one installation to keep."
+  fi
+
+  # Safe migration: copy data, update origin, then move legacy aside
+  log "Migrating legacy data to ${INSTALL_DIR}..."
+  mkdir -p "${INSTALL_DIR}"
+
+  # Copy accounts (preserve structure)
+  for src in "${LEGACY_ACCOUNTS[@]}"; do
+    dst="${INSTALL_DIR}/Userbot/accounts"
+    mkdir -p "$dst"
+    cp -rn "$src"/* "$dst/" 2>/dev/null || true
+    log "Copied accounts from $src to $dst"
+  done
+
+  # Copy data
+  for src in "${LEGACY_DATA[@]}"; do
+    dst="${INSTALL_DIR}/Userbot/data"
+    mkdir -p "$dst"
+    cp -rn "$src"/* "$dst/" 2>/dev/null || true
+    log "Copied data from $src to $dst"
+  done
+
+  # Copy .env
+  for src in "${LEGACY_ENV[@]}"; do
+    dst="${INSTALL_DIR}/Userbot/.env"
+    cp "$src" "$dst" 2>/dev/null || true
+    log "Copied .env from $src to $dst"
+  done
+
+  # Update origin URL in legacy repo, then move it aside
+  log "Updating legacy repository origin to new repository..."
+  git -C "${LEGACY_DIR}" remote set-url origin "https://github.com/parhamghahremani/TeleWeave.git" || warn "Could not update legacy origin; continuing anyway."
+  mv "${LEGACY_DIR}" "${INSTALL_DIR}.legacy_backup"
+  log "Legacy repo backed up to ${INSTALL_DIR}.legacy_backup"
+
+  # Continue with fresh clone at INSTALL_DIR
+  log "Cloning new repository into ${INSTALL_DIR}..."
+  git clone "$REPO_URL" "$INSTALL_DIR" || die "git clone failed. Check the URL and network connection."
+
+  OLD_VERSION="legacy (migrated)"
+  OLD_SHA="$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+elif [[ -d "${INSTALL_DIR}/.git" ]]; then
   OLD_VERSION="$(read_version)"
   OLD_SHA="$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
   sync_existing_repository
@@ -560,7 +644,7 @@ case "${1:-}" in
     run_update "$@"
     ;;
   reinstall)
-    exec bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/parhamghahremani/userbot_own/main/install.sh | bash'
+    exec bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/parhamghahremani/TeleWeave/main/install.sh | bash'
     ;;
   version|--version)
     printf 'TeleWeave/Userbot version %s\n' "$(current_version)"
@@ -580,6 +664,17 @@ LAUNCHER_BODY
 } > "$LAUNCHER_DEST"
 chmod 0755 "$LAUNCHER_DEST"
 ok "Launcher generated at ${LAUNCHER_DEST}."
+
+# -----------------------------------------------------------------------------
+# Compatibility alias: userbot -> teleweave (for existing users)
+# -----------------------------------------------------------------------------
+USERBOT_ALIAS="${BIN_DIR}/userbot"
+if [[ ! -e "$USERBOT_ALIAS" ]]; then
+  ln -s "$LAUNCHER_DEST" "$USERBOT_ALIAS"
+  ok "Created compatibility alias: userbot -> teleweave"
+else
+  log "Compatibility alias 'userbot' already exists; leaving as-is."
+fi
 
 # -----------------------------------------------------------------------------
 # Completion summary and PATH check
