@@ -103,3 +103,69 @@ jobs:
           else
             echo "OK No log files tracked"
           fi
+
+  legacy-migration-test:
+    name: Legacy Migration Integration Tests (18 scenarios)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: linux-verification
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel build
+          pip install -r requirements.txt
+
+      - name: Build wheel for installer testing
+        run: |
+          python -m build --wheel --no-isolation
+
+      - name: Make install.sh and test script executable
+        run: |
+          chmod +x install.sh test_legacy_migration.sh
+
+      - name: Run legacy migration integration tests
+        run: |
+          bash test_legacy_migration.sh
+        env:
+          GIT_AUTHOR_NAME: "TeleWeave Test"
+          GIT_AUTHOR_EMAIL: "test@teleweave.local"
+          GIT_COMMITTER_NAME: "TeleWeave Test"
+          GIT_COMMITTER_EMAIL: "test@teleweave.local"
+
+  runtime-paths-verification:
+    name: Runtime Paths Resolution (dev + installed mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: linux-verification
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel build
+          pip install -r requirements.txt
+
+      - name: Verify runtime paths resolution (dev + installed mode)
+        run: python test_runtime_paths_ci.py
