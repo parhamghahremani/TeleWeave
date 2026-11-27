@@ -678,9 +678,10 @@ test_recovery_activate_phase() {
   # Create completed staging with full TeleWeave structure
   mkdir -p "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/accounts/1"
   mkdir -p "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/data"
-  cp -r "${test_home}/userbot_own/accounts/1" "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/accounts/"
-  cp "${test_home}/userbot_own/.env" "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/"
-  cp -r "${test_home}/userbot_own/data" "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/"
+  # Package-internal layout: $HOME/userbot_own/userbot_own/{accounts,data,.env}
+  cp -r "${test_home}/userbot_own/userbot_own/accounts/1" "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/accounts/"
+  cp "${test_home}/userbot_own/userbot_own/.env" "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/"
+  cp -r "${test_home}/userbot_own/userbot_own/data" "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/"
   echo -e "stage=activate\npid=12345\ntimestamp=2024-01-01T00:00:00+00:00\nlegacy_path=${test_home}/userbot_own\nbackup_path=${test_home}/TeleWeave.legacy_backup_xxx\nnew_path=${test_home}/TeleWeave\nstaging_path=${test_home}/.teleweave_migration_staging_12345" > "${test_home}/.teleweave_migration_staging_12345/.migration_state"
   # Create backup dir to simulate it was already moved
   mv "${test_home}/userbot_own" "${test_home}/TeleWeave.legacy_backup_xxx"

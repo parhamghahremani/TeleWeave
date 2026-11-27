@@ -1076,19 +1076,32 @@ determine_installation_state() {
 main() {
   log "Detected platform: ${PLATFORM}"
   check_required_tools
-  install_python_and_git
 
-  PY_VERSION="$("$PYTHON_BIN" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo unknown)"
-  log "Using ${PYTHON_BIN} (Python ${PY_VERSION})"
-  if [[ ! "$PY_VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
-    die "Could not determine the Python version. Python 3.11+ is required."
+  # Skip Python/git installation if SKIP_VENV is set (used for testing)
+  if [[ "${SKIP_VENV:-false}" == "true" ]]; then
+    log "SKIP_VENV=true: skipping Python/git installation"
+    if command -v python3 >/dev/null 2>&1; then
+      PYTHON_BIN="python3"
+    elif command -v python >/dev/null 2>&1; then
+      PYTHON_BIN="python"
+    else
+      die "No Python interpreter found on PATH. Python 3.11+ is required."
+    fi
+  else
+    install_python_and_git
+
+    PY_VERSION="$("$PYTHON_BIN" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo unknown)"
+    log "Using ${PYTHON_BIN} (Python ${PY_VERSION})"
+    if [[ ! "$PY_VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
+      die "Could not determine the Python version. Python 3.11+ is required."
+    fi
+    PY_MAJOR="${PY_VERSION%%.*}"
+    PY_MINOR="${PY_VERSION##*.}"
+    if [[ "$PY_MAJOR" -lt 3 || ( "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 11 ) ]]; then
+      die "Python ${PY_VERSION} is too old. Python 3.11 or newer is required."
+    fi
+    ok "Python version requirement satisfied."
   fi
-  PY_MAJOR="${PY_VERSION%%.*}"
-  PY_MINOR="${PY_VERSION##*.}"
-  if [[ "$PY_MAJOR" -lt 3 || ( "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 11 ) ]]; then
-    die "Python ${PY_VERSION} is too old. Python 3.11 or newer is required."
-  fi
-  ok "Python version requirement satisfied."
 
   # Determine installation state FIRST (before any migration logic)
   determine_installation_state
@@ -1111,6 +1124,8 @@ main() {
         done
       fi
     fi
+    # Recovery inspection handles everything. Exit after completion.
+    exit 0
   fi
 
   # Case D: Both legacy and new installations exist
