@@ -41,8 +41,12 @@ def test_installed_mode():
     with tempfile.TemporaryDirectory() as tmpdir:
         venv_dir = Path(tmpdir) / 'venv'
         subprocess.run([sys.executable, '-m', 'venv', str(venv_dir)], check=True)
-        pip = venv_dir / 'bin' / 'pip'
-        python_bin = venv_dir / 'bin' / 'python'
+        if sys.platform == 'win32':
+            pip = venv_dir / 'Scripts' / 'pip.exe'
+            python_bin = venv_dir / 'Scripts' / 'python.exe'
+        else:
+            pip = venv_dir / 'bin' / 'pip'
+            python_bin = venv_dir / 'bin' / 'python'
         subprocess.run([str(pip), 'install', str(wheel)], check=True, capture_output=True)
         subprocess.run([str(pip), 'install', '-r', 'requirements.txt'], check=True, capture_output=True, cwd='.')
 
