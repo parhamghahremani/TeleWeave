@@ -51,6 +51,29 @@ fail() { printf '%b[FAIL]%b %s\n' "$E" "$R" "$1"; FAIL_COUNT=$((FAIL_COUNT + 1))
 skip() { printf '%b[SKIP]%b %s\n' "$Y" "$R" "$1"; SKIP_COUNT=$((SKIP_COUNT + 1)); }
 
 # -----------------------------------------------------------------------------
+# Helper: Run installer with diagnostic logging
+# Usage: run_installer <test_home> <test_name> [expected_exit_code]
+#   expected_exit_code: default 0 (success). Use 1 for tests that expect failure.
+# -----------------------------------------------------------------------------
+run_installer() {
+  local test_home="$1"
+  local test_name="$2"
+  local expected_exit="${3:-0}"
+  local install_sh="${test_home}/install.sh"
+  local install_log="${test_home}/install_${test_name}.log"
+
+  HOME="${test_home}" bash "${install_sh}" >"${install_log}" 2>&1
+  local exit_code=$?
+  if [[ $exit_code -ne $expected_exit ]]; then
+    fail "${test_name} failed (exit code: ${exit_code}, expected: ${expected_exit})"
+    log "Installer log (${install_log}):"
+    cat "${install_log}" | sed 's/^/  /'
+    return 1
+  fi
+  return 0
+}
+
+# -----------------------------------------------------------------------------
 # Test Environment Setup
 # -----------------------------------------------------------------------------
 setup_test_env() {
@@ -240,7 +263,7 @@ test_fresh_install() {
   local test_home="$(mktemp -d -t test1_XXXXXX)"
   local install_sh="${test_home}/install.sh"
   cp "${INSTALL_SH}" "${install_sh}"
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 || { fail "Fresh install failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test1" || { rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave" ]] || { fail "TeleWeave directory not created"; rm -rf "${test_home}"; return 1; }
   [[ -f "${test_home}/TeleWeave/main.py" ]] || { fail "main.py not found"; rm -rf "${test_home}"; return 1; }
   ok "Fresh install works"
@@ -248,20 +271,38 @@ test_fresh_install() {
 }
 
 # -----------------------------------------------------------------------------
-# Test 2: Update existing TeleWeave
+# Test 2: Update existing TeleWeave (fast-forward from local Git remote)
 # -----------------------------------------------------------------------------
 test_update_existing() {
-  log "Test 2: Update existing TeleWeave"
+  log "Test 2: Update existing TeleWeave (fast-forward from local Git remote)"
   local test_home="$(mktemp -d -t test2_XXXXXX)"
   local install_sh="${test_home}/install.sh"
   cp "${INSTALL_SH}" "${install_sh}"
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 || { fail "Initial install failed"; rm -rf "${test_home}"; return 1; }
-  # Modify VERSION in remote to simulate update
-  cd "${GIT_REMOTE}" || return 1
-  # Can't easily modify bare repo, so we'll skip the actual update test
-  # and just verify the install exists
+  # First install
+  run_installer "${test_home}" "test2" || { rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave" ]] || { fail "TeleWeave directory not found"; rm -rf "${test_home}"; return 1; }
-  ok "Existing installation detected"
+
+  # Now simulate an update by modifying the bare remote
+  # Create a worktree, update VERSION, commit and push
+  local update_workdir="${test_home}/update_worktree"
+  git clone "${GIT_REMOTE}" "${update_workdir}" >/dev/null 2>&1
+  cd "${update_workdir}"
+  echo "3.2.14" > VERSION
+  git config user.email "test@teleweave.local"
+  git config user.name "TeleWeave Test"
+  git add VERSION
+  git commit -m "Bump version to 3.2.14" >/dev/null 2>&1
+  git push origin main >/dev/null 2>&1
+  cd "${test_home}"
+  rm -rf "${update_workdir}"
+
+  # Run installer again - should fast-forward
+  run_installer "${test_home}" "test2_update" || { rm -rf "${test_home}"; return 1; }
+  # Verify VERSION was updated
+  [[ -f "${test_home}/TeleWeave/VERSION" ]] || { fail "VERSION file not found after update"; rm -rf "${test_home}"; return 1; }
+  local version=$(cat "${test_home}/TeleWeave/VERSION")
+  [[ "$version" == "3.2.14" ]] || { fail "Fast-forward failed: VERSION is $version, expected 3.2.14"; rm -rf "${test_home}"; return 1; }
+  ok "Fast-forward update from local Git remote works"
   rm -rf "${test_home}"
 }
 
@@ -285,7 +326,7 @@ test_legacy_pkg_layout() {
   touch "${test_home}/userbot_own/userbot_own/accounts/1/session.session-journal"
   echo "connection=direct" > "${test_home}/userbot_own/userbot_own/data/connection.json"
   echo "LOG_LEVEL=DEBUG" > "${test_home}/userbot_own/userbot_own/.env"
-  bash "${install_sh}" >/dev/null 2>&1 || { fail "Migration failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test3" || { rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave" ]] || { fail "TeleWeave not created"; rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave/Userbot/accounts/1" ]] || { fail "accounts not migrated"; rm -rf "${test_home}"; return 1; }
   [[ -f "${test_home}/TeleWeave/Userbot/accounts/1/session.session" ]] || { fail "session not migrated"; rm -rf "${test_home}"; return 1; }
@@ -293,10 +334,10 @@ test_legacy_pkg_layout() {
   [[ -f "${test_home}/TeleWeave/Userbot/.env" ]] || { fail ".env not migrated"; rm -rf "${test_home}"; return 1; }
   [[ -f "${test_home}/TeleWeave/Userbot/data/connection.json" ]] || { fail "connection.json not migrated"; rm -rf "${test_home}"; return 1; }
   # Check for backup directory using nullglob
-        shopt -s nullglob
-        local backup_dirs=("${test_home}/TeleWeave.legacy_backup_"*)
-        shopt -u nullglob
-        [[ -d "${backup_dirs[0]}" ]] || { fail "Legacy backup not created"; rm -rf "${test_home}"; return 1; }
+  shopt -s nullglob
+  local backup_dirs=("${test_home}/TeleWeave.legacy_backup_"*)
+  shopt -u nullglob
+  [[ -d "${backup_dirs[0]}" ]] || { fail "Legacy backup not created"; rm -rf "${test_home}"; return 1; }
   ok "Package-internal layout migration works"
   rm -rf "${test_home}"
 }
@@ -311,7 +352,7 @@ test_legacy_root_layout() {
   cp "${INSTALL_SH}" "${install_sh}"
   HOME="${test_home}"
   create_legacy_root_layout "${test_home}"
-  bash "${install_sh}" >/dev/null 2>&1 || { fail "Migration failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test4" || { rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave" ]] || { fail "TeleWeave not created"; rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave/Userbot/accounts/1" ]] || { fail "accounts not migrated"; rm -rf "${test_home}"; return 1; }
   [[ -f "${test_home}/TeleWeave/Userbot/accounts/1/session.session" ]] || { fail "session not migrated"; rm -rf "${test_home}"; return 1; }
@@ -358,7 +399,7 @@ test_legacy_mixed_layout() {
   touch "${test_home}/userbot_own/accounts/1/session.session-journal"
   echo "connection=direct" > "${test_home}/userbot_own/data/connection.json"
   echo "LOG_LEVEL=DEBUG" > "${test_home}/userbot_own/.env"
-  bash "${install_sh}" >/dev/null 2>&1 || { fail "Migration failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test5" || { rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave" ]] || { fail "TeleWeave not created"; rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave/Userbot/accounts/1" ]] || { fail "accounts not migrated"; rm -rf "${test_home}"; return 1; }
   # Check for backup directory using nullglob
@@ -401,7 +442,7 @@ test_duplicate_identical() {
   touch "${test_home}/userbot_own/accounts/1/session.session-journal"
   echo "connection=direct" > "${test_home}/userbot_own/data/connection.json"
   echo "LOG_LEVEL=DEBUG" > "${test_home}/userbot_own/.env"
-  bash "${install_sh}" >/dev/null 2>&1 || { fail "Migration failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test6" || { rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave" ]] || { fail "TeleWeave not created"; rm -rf "${test_home}"; return 1; }
   ok "Identical duplicates handled (first source used)"
   rm -rf "${test_home}"
@@ -438,8 +479,8 @@ test_duplicate_conflict() {
   mkdir -p "${test_home}/userbot_own/data/logs"
   echo "connection=direct" > "${test_home}/userbot_own/data/connection.json"
   echo "LOG_LEVEL=DEBUG" > "${test_home}/userbot_own/.env"
-  # This should fail with conflict
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 && { fail "Should have failed on conflict"; rm -rf "${test_home}"; return 1; }
+  # This should fail with conflict (expected exit code 1)
+  run_installer "${test_home}" "test7" 1 || { rm -rf "${test_home}"; return 1; }
   ok "Content conflict correctly detected and aborted"
   rm -rf "${test_home}"
 }
@@ -466,7 +507,7 @@ test_hidden_files() {
   echo "LOG_LEVEL=DEBUG" > "${test_home}/userbot_own/userbot_own/.env"
   # Add hidden file in package-internal layout
   echo "secret=value" > "${test_home}/userbot_own/userbot_own/accounts/1/.hidden_config"
-  bash "${install_sh}" >/dev/null 2>&1 || { fail "Migration failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test8" || { rm -rf "${test_home}"; return 1; }
   [[ -f "${test_home}/TeleWeave/Userbot/accounts/1/.hidden_config" ]] || { fail "Hidden file not migrated"; rm -rf "${test_home}"; return 1; }
   ok "Hidden files migrated correctly"
   rm -rf "${test_home}"
@@ -493,7 +534,7 @@ test_zero_byte_journal() {
   echo "connection=direct" > "${test_home}/userbot_own/userbot_own/data/connection.json"
   echo "LOG_LEVEL=DEBUG" > "${test_home}/userbot_own/userbot_own/.env"
   # Ensure session-journal is zero-byte (already is from touch)
-  bash "${install_sh}" >/dev/null 2>&1 || { fail "Migration failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test9" || { rm -rf "${test_home}"; return 1; }
   [[ -f "${test_home}/TeleWeave/Userbot/accounts/1/session.session-journal" ]] || { fail "Zero-byte journal not migrated"; rm -rf "${test_home}"; return 1; }
   # Verify size is 0
   local size=$(stat -c%s "${test_home}/TeleWeave/Userbot/accounts/1/session.session-journal" 2>/dev/null || stat -f%z "${test_home}/TeleWeave/Userbot/accounts/1/session.session-journal" 2>/dev/null)
@@ -524,7 +565,7 @@ test_symlink_abort() {
   echo "LOG_LEVEL=DEBUG" > "${test_home}/userbot_own/userbot_own/.env"
   # Add symlink in package-internal layout (skip if not supported)
   ln -s /etc/passwd "${test_home}/userbot_own/userbot_own/accounts/1/malicious_link" 2>/dev/null || { skip "Cannot create symlink (permission/OS)"; rm -rf "${test_home}"; return 0; }
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 && { fail "Should have failed on symlink"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test10" && { fail "Should have failed on symlink"; rm -rf "${test_home}"; return 1; }
   ok "Symlink correctly detected and aborted"
   rm -rf "${test_home}"
 }
@@ -551,7 +592,7 @@ test_special_files_abort() {
   echo "LOG_LEVEL=DEBUG" > "${test_home}/userbot_own/userbot_own/.env"
   # Add FIFO in package-internal layout
   mkfifo "${test_home}/userbot_own/userbot_own/accounts/1/test_fifo" 2>/dev/null || { skip "Cannot create FIFO (permission)"; rm -rf "${test_home}"; return 0; }
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 && { fail "Should have failed on FIFO"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test11" 1 || { rm -rf "${test_home}"; return 1; }
   ok "FIFO correctly detected and aborted"
   rm -rf "${test_home}"
 }
@@ -616,8 +657,8 @@ test_concurrent_lock() {
   mkdir -p "${test_home}/.teleweave_migration.lock"
   echo "999999" > "${test_home}/.teleweave_migration.lock/pid"
   echo "2020-01-01T00:00:00+00:00" > "${test_home}/.teleweave_migration.lock/started"
-  # Should detect stale lock and refuse to auto-delete
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 && { fail "Should have failed on stale lock"; rm -rf "${test_home}"; return 1; }
+  # Should detect stale lock and refuse to auto-delete (expected exit code 1)
+  run_installer "${test_home}" "test13" 1 || { rm -rf "${test_home}"; return 1; }
   ok "Stale lock correctly detected and blocked"
   rm -rf "${test_home}"
 }
@@ -636,7 +677,7 @@ test_recovery_clone_phase() {
   mkdir -p "${test_home}/.teleweave_migration_staging_12345/TeleWeave"
   echo -e "stage=clone\npid=12345\ntimestamp=2024-01-01T00:00:00+00:00\nlegacy_path=${test_home}/userbot_own\nbackup_path=\nnew_path=${test_home}/TeleWeave\nstaging_path=${test_home}/.teleweave_migration_staging_12345" > "${test_home}/.teleweave_migration_staging_12345/.migration_state"
   # Run installer - should clean up staging and leave legacy intact
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 || { fail "Recovery failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test14" || { rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/userbot_own" ]] || { fail "Legacy not preserved"; rm -rf "${test_home}"; return 1; }
   [[ ! -d "${test_home}/.teleweave_migration_staging_12345" ]] || { fail "Staging not cleaned up"; rm -rf "${test_home}"; return 1; }
   ok "Clone phase recovery works"
@@ -658,7 +699,7 @@ test_recovery_copy_phase() {
   mkdir -p "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/accounts"
   mkdir -p "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/data"
   echo -e "stage=copy_data\npid=12345\ntimestamp=2024-01-01T00:00:00+00:00\nlegacy_path=${test_home}/userbot_own\nbackup_path=\nnew_path=${test_home}/TeleWeave\nstaging_path=${test_home}/.teleweave_migration_staging_12345" > "${test_home}/.teleweave_migration_staging_12345/.migration_state"
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 || { fail "Recovery failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test15" || { rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/userbot_own" ]] || { fail "Legacy not preserved"; rm -rf "${test_home}"; return 1; }
   [[ ! -d "${test_home}/.teleweave_migration_staging_12345" ]] || { fail "Staging not cleaned up"; rm -rf "${test_home}"; return 1; }
   ok "Copy phase recovery works"
@@ -685,7 +726,7 @@ test_recovery_activate_phase() {
   echo -e "stage=activate\npid=12345\ntimestamp=2024-01-01T00:00:00+00:00\nlegacy_path=${test_home}/userbot_own\nbackup_path=${test_home}/TeleWeave.legacy_backup_xxx\nnew_path=${test_home}/TeleWeave\nstaging_path=${test_home}/.teleweave_migration_staging_12345" > "${test_home}/.teleweave_migration_staging_12345/.migration_state"
   # Create backup dir to simulate it was already moved
   mv "${test_home}/userbot_own" "${test_home}/TeleWeave.legacy_backup_xxx"
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 || { fail "Recovery failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test16" || { rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave" ]] || { fail "TeleWeave not activated"; rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave.legacy_backup_xxx" ]] || { fail "Backup not preserved"; rm -rf "${test_home}"; return 1; }
   ok "Activate phase recovery works"
@@ -702,11 +743,14 @@ test_recovery_backup_phase() {
   cp "${INSTALL_SH}" "${install_sh}"
   HOME="${test_home}"
   create_legacy_pkg_layout "${test_home}"
+  # Create complete TeleWeave structure in staging for verify_staging_complete
   mkdir -p "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot"
+  touch "${test_home}/.teleweave_migration_staging_12345/TeleWeave/main.py"
+  touch "${test_home}/.teleweave_migration_staging_12345/TeleWeave/Userbot/__init__.py"
   # Simulate backup already done (legacy moved to backup)
   mv "${test_home}/userbot_own" "${test_home}/TeleWeave.legacy_backup_xxx"
   echo -e "stage=backup_legacy\npid=12345\ntimestamp=2024-01-01T00:00:00+00:00\nlegacy_path=${test_home}/userbot_own\nbackup_path=${test_home}/TeleWeave.legacy_backup_xxx\nnew_path=${test_home}/TeleWeave\nstaging_path=${test_home}/.teleweave_migration_staging_12345" > "${test_home}/.teleweave_migration_staging_12345/.migration_state"
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 || { fail "Recovery failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test17" || { rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave" ]] || { fail "TeleWeave not activated"; rm -rf "${test_home}"; return 1; }
   [[ -d "${test_home}/TeleWeave.legacy_backup_xxx" ]] || { fail "Backup not preserved"; rm -rf "${test_home}"; return 1; }
   ok "Backup phase recovery works"
@@ -723,7 +767,7 @@ test_backup_preservation() {
   cp "${INSTALL_SH}" "${install_sh}"
   HOME="${test_home}"
   create_legacy_pkg_layout "${test_home}"
-  bash "${install_sh}" >/dev/null 2>&1 || { fail "Migration failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test18" || { rm -rf "${test_home}"; return 1; }
   # Check backup exists
   local backup_dirs=("${test_home}"/TeleWeave.legacy_backup_*)
   [[ -d "${backup_dirs[0]}" ]] || { fail "Backup directory not created"; rm -rf "${test_home}"; return 1; }
@@ -731,7 +775,7 @@ test_backup_preservation() {
   [[ -d "${backup_dirs[0]}/userbot_own/accounts/1" ]] || { fail "Backup missing accounts"; rm -rf "${test_home}"; return 1; }
   [[ -f "${backup_dirs[0]}/userbot_own/.env" ]] || { fail "Backup missing .env"; rm -rf "${test_home}"; return 1; }
   # Run again - should detect existing installation and update
-  HOME="${test_home}" bash "${install_sh}" >/dev/null 2>&1 || { fail "Second run failed"; rm -rf "${test_home}"; return 1; }
+  run_installer "${test_home}" "test18_rerun" || { rm -rf "${test_home}"; return 1; }
   ok "Backup preserved and migration idempotent"
   rm -rf "${test_home}"
 }

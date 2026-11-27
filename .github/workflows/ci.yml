@@ -143,6 +143,7 @@ jobs:
           GIT_AUTHOR_EMAIL: "test@teleweave.local"
           GIT_COMMITTER_NAME: "TeleWeave Test"
           GIT_COMMITTER_EMAIL: "test@teleweave.local"
+          SKIP_VENV: "true"
 
   runtime-paths-verification:
     name: Runtime Paths Resolution (dev + installed mode)
