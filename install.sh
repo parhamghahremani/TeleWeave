@@ -14,7 +14,7 @@ set -Eeuo pipefail
 # -----------------------------------------------------------------------------
 # Configuration
 # -----------------------------------------------------------------------------
-REPO_URL="/tmp/teleweave_test_cjffxw/remote.git"
+REPO_URL="https://github.com/parhamghahremani/TeleWeave.git"
 REPO_NAME="TeleWeave"
 INSTALL_DIR="${HOME}/${REPO_NAME}"
 LAUNCHER_NAME="teleweave"
