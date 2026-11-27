@@ -109,6 +109,16 @@ verify_protected_paths_preserved() {
 [[ -x "$VENV_PY" ]] \
   || die "Virtual environment not found at ${INSTALL_DIR}/.venv. Re-run install.sh."
 
+# Check and update origin URL if it points to the old repository
+CURRENT_ORIGIN="$(git -C "$INSTALL_DIR" config --get remote.origin.url 2>/dev/null || echo "")"
+if [[ "$CURRENT_ORIGIN" == *"userbot_own"* ]]; then
+  log "Detected legacy origin URL: ${CURRENT_ORIGIN}"
+  log "Updating origin to new repository..."
+  git -C "$INSTALL_DIR" remote set-url origin "https://github.com/parhamghahremani/TeleWeave.git" \
+    || die "Failed to update origin URL. Please run: git -C ${INSTALL_DIR} remote set-url origin https://github.com/parhamghahremani/TeleWeave.git"
+  ok "Origin URL updated to TeleWeave repository."
+fi
+
 PY_VERSION="$("$VENV_PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo unknown)"
 if [[ ! "$PY_VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
   die "Could not determine the virtual environment Python version (${VENV_PY})."

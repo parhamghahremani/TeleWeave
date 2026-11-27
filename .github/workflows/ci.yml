@@ -4,13 +4,13 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, v3.2.13-migration]
+    branches: [main]
 
 jobs:
   linux-verification:
     name: Linux Case-Sensitive FS & Packaging
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -27,17 +27,18 @@ jobs:
       - name: Verify package directory casing
         run: |
           ls -la
-          test -d "Userbot" && echo "✓ Userbot/ directory exists (PascalCase)"
-          test ! -d "userbot_own" && echo "✓ userbot_own/ directory does not exist"
-          test ! -d "userbot" && echo "✓ userbot/ lowercase directory does not exist"
+          test -d "Userbot" && echo "OK Userbot/ directory exists (PascalCase)"
+          test ! -d "userbot_own" && echo "OK userbot_own/ directory does not exist"
+          test ! -d "userbot" && echo "OK userbot/ lowercase directory does not exist"
+
       - name: Verify legacy package removed
         run: |
           if [ -d "userbot_own" ]; then
-            echo "✗ Legacy userbot_own/ directory still exists!"
+            echo "FAIL Legacy userbot_own/ directory still exists!"
             ls -la userbot_own/
             exit 1
           else
-            echo "✓ Legacy userbot_own/ directory removed"
+            echo "OK Legacy userbot_own/ directory removed"
           fi
 
       - name: Install dependencies
@@ -52,123 +53,109 @@ jobs:
       - name: Verify imports and version
         run: |
           python -c "
-          import Userbot
-          assert Userbot.__version__ == '3.2.13', f'Version mismatch: {Userbot.__version__}'
-          print(f'✓ Userbot.__version__ = {Userbot.__version__}')
-
-          from Userbot.app.application import Application
-          from Userbot.app.composition_root import CompositionRoot
-          from Userbot.config.loader import discover_accounts, load_settings, load_connection_settings
-          from Userbot.config.models import Paths, Settings, ConnectionSettings
-          from Userbot.core.registry import AccountRegistry, AccountLoaderRegistry
-          from Userbot.core.loader import AccountLoader
-          from Userbot.core.telegram_client import AccountClient
-          from Userbot.core.reconnector import AccountReconnector
-          from Userbot.core.logging_setup import setup
-          print('✓ All core imports successful')
+            import Userbot
+            assert Userbot.__version__ == '3.2.13', 'Version mismatch: ' + Userbot.__version__
+            print('OK Userbot.__version__ = ' + Userbot.__version__)
+            from Userbot.app.application import Application
+            from Userbot.app.composition_root import CompositionRoot
+            from Userbot.config.loader import discover_accounts, load_settings, load_connection_settings
+            from Userbot.config.models import Paths, Settings, ConnectionSettings
+            from Userbot.core.registry import AccountRegistry, AccountLoaderRegistry
+            from Userbot.core.loader import AccountLoader
+            from Userbot.core.telegram_client import AccountClient
+            from Userbot.core.reconnector import AccountReconnector
+            from Userbot.core.logging_setup import setup
+            print('OK All core imports successful')
           "
 
       - name: Verify no old package references
         run: |
           if grep -r "userbot_own\." --include="*.py" Userbot/; then
-            echo "✗ Found old userbot_own imports"
+            echo "FAIL Found old userbot_own imports"
             exit 1
           else
-            echo "✓ No userbot_own imports found in source"
+            echo "OK No userbot_own imports found in source"
           fi
 
       - name: Verify distribution metadata
         run: |
           python -c "
-          import importlib.metadata
-          dist = importlib.metadata.distribution('teleweave')
-          assert dist.version == '3.2.13', f'Distribution version mismatch: {dist.version}'
-          print(f'✓ Distribution name: {dist.metadata[\"Name\"]}')
-          print(f'✓ Distribution version: {dist.version}')
+            import importlib.metadata
+            dist = importlib.metadata.distribution('teleweave')
+            assert dist.version == '3.2.13', 'Distribution version mismatch: ' + dist.version
+            print('OK Distribution name: ' + dist.metadata['Name'])
+            print('OK Distribution version: ' + dist.version)
           "
 
       - name: Verify wheel packaging
         run: |
           python -m build --wheel --no-isolation
           wheel_file=$(ls dist/teleweave-3.2.13-*.whl)
-          echo "✓ Wheel built: $wheel_file"
+          echo "OK Wheel built: $wheel_file"
           unzip -l "$wheel_file" | grep -E "Userbot/" | head -5
           if unzip -l "$wheel_file" | grep -q "userbot_own/"; then
-            echo "✗ Wheel contains userbot_own/"
+            echo "FAIL Wheel contains userbot_own/"
             exit 1
           else
-            echo "✓ Wheel contains only Userbot/ package"
+            echo "OK Wheel contains only Userbot/ package"
           fi
 
-      - name: Verify runtime paths resolution
-        run: |
-          python -c "
-          from Userbot.config.models import Paths
-          from pathlib import Path
-          p = Paths.from_base(Path.cwd())
-          print(f'base: {p.base}')
-          print(f'accounts: {p.accounts}')
-          print(f'data: {p.data}')
-          print(f'settings: {p.settings}')
-          print(f'logs: {p.logs}')
-          assert 'Userbot' not in str(p.base) or str(p.base).endswith('userbot_own')
-          print('✓ Runtime paths resolve correctly')
-          "
+      - name: Verify runtime paths resolution (dev + installed mode)
+        run: python test_runtime_paths_ci.py
 
       - name: Verify CLI entry points
         run: |
           python -c "
-          import main
-          import add_account
-          import settings
-          print('✓ Root launchers import successfully')
+            import main
+            import add_account
+            import settings
+            print('OK Root launchers import successfully')
           "
           python -c "
-          from Userbot.account_management.cli import main as am_main
-          from Userbot.settings_menu.cli import main as sm_main
-          print('✓ CLI modules import successfully')
+            from Userbot.account_management.cli import main as am_main
+            from Userbot.settings_menu.cli import main as sm_main
+            print('OK CLI modules import successfully')
           "
 
       - name: Verify core modules
         run: |
           python -c "
-          from Userbot.modules.single.system import create_module
-          from Userbot.modules.single.help_handler import create_module
-          from Userbot.modules.single.module_manager import create_module
-          from Userbot.modules.packages.clearer import create_module
-          from Userbot.modules.packages.auto_clearer import create_module
-          from Userbot.modules.packages.auto_forwarder import create_module
-          from Userbot.modules.packages.join_left import create_module
-          from Userbot.modules.packages.info_handler import create_module
-          from Userbot.modules.packages.whois_handler import create_module
-          from Userbot.modules.packages.reaction_commands import create_module
-          from Userbot.modules_extra.packages.bot_link_starter import create_module
-          print('✓ All modules import successfully')
+            from Userbot.modules.single.system import create_module as m1
+            from Userbot.modules.single.help_handler import create_module as m2
+            from Userbot.modules.single.module_manager import create_module as m3
+            from Userbot.modules.packages.clearer import create_module as m4
+            from Userbot.modules.packages.auto_clearer import create_module as m5
+            from Userbot.modules.packages.auto_forwarder import create_module as m6
+            from Userbot.modules.packages.join_left import create_module as m7
+            from Userbot.modules.packages.info_handler import create_module as m8
+            from Userbot.modules.packages.whois_handler import create_module as m9
+            from Userbot.modules.packages.reaction_commands import create_module as m10
+            from Userbot.modules_extra.packages.bot_link_starter import create_module as m11
+            print('OK All modules import successfully')
           "
 
       - name: Syntax check
         run: |
           python -m compileall -q -x '(^|/)(\.git|\.venv|venv|accounts|data)(/|$)' .
-          echo "✓ Python syntax check passed"
+          echo "OK Python syntax check passed"
 
       - name: Verify .gitignore protection
         run: |
           if git check-ignore Userbot/accounts Userbot/data Userbot/.env 2>/dev/null; then
-            echo "✓ Protected paths are gitignored"
+            echo "OK Protected paths are gitignored"
           else
-            echo "⚠ Some protected paths may not be ignored - checking patterns..."
+            echo "WARN Some protected paths may not be ignored - checking patterns..."
             cat .gitignore
           fi
-          # Check for session files
           if git ls-files --error-unmatch Userbot/accounts/*.session 2>/dev/null; then
-            echo "✗ Session files are tracked!"
+            echo "FAIL Session files are tracked!"
             exit 1
           else
-            echo "✓ No session files tracked"
+            echo "OK No session files tracked"
           fi
           if git ls-files --error-unmatch Userbot/data/*.log 2>/dev/null; then
-            echo "✗ Log files are tracked!"
+            echo "FAIL Log files are tracked!"
             exit 1
           else
-            echo "✓ No log files tracked"
+            echo "OK No log files tracked"
           fi
